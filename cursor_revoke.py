@@ -14,6 +14,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -228,3 +229,125 @@ def human(n):
 
 def fmt_date(ts):
     return time.strftime("%Y-%m-%d", time.localtime(ts)) if ts else "?"
+
+
+# --------------------------------------------------------------------------- projects
+PROJECT_SUBDIRS = ("mcps", "agent-transcripts", "terminals", "canvases")
+TEMP_NAME = re.compile(r"tmp-[0-9a-fA-F][0-9a-fA-F-]{6,}")
+
+
+def encode_project(path):
+    """Cursor names a project's data folder after its path: every character that
+    is not a letter or digit becomes '-', and leading/trailing '-' are dropped."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path)).strip("-")
+
+
+def file_uri_path(uri):
+    if not isinstance(uri, str) or not uri.startswith("file://"):
+        return None
+    path = urllib.parse.unquote(urllib.parse.urlsplit(uri).path)
+    return path.rstrip("/") or None if path.startswith("/") else None
+
+
+def known_folders():
+    """Project folders Cursor knows about, from its JSON state files only."""
+    out = set()
+    uris = []
+    ws = CURSOR_USER_DIR / "workspaceStorage"
+    try:
+        files = sorted(ws.glob("*/workspace.json"))
+    except OSError:
+        files = []
+    for f in files:
+        uris.append(as_dict(load_json(f)).get("folder"))
+    st = as_dict(load_json(CURSOR_USER_DIR / "globalStorage" / "storage.json"))
+    for e in as_list(as_dict(st.get("backupWorkspaces")).get("folders")):
+        uris.append(as_dict(e).get("folderUri"))
+    uris += list(as_dict(as_dict(st.get("profileAssociations")).get("workspaces")))
+    for u in uris:
+        p = file_uri_path(u)
+        if p:
+            out.add(p)
+    return out
+
+
+def probe(base, parts, budget):
+    # The encoding turned "/", "-", "." and "_" all into "-". Try taking the
+    # next k parts as one path segment, rejoined with each separator, and
+    # recurse on the rest. First full match wins.
+    if not parts:
+        return base
+    for k in range(1, len(parts) + 1):
+        seps = ("-",) if k == 1 else ("-", ".", "_")
+        for sep in seps:
+            budget[0] -= 1
+            if budget[0] < 0:
+                return None
+            seg = base / sep.join(parts[:k])
+            if seg.is_dir():
+                found = probe(seg, parts[k:], budget)
+                if found:
+                    return found
+    return None
+
+
+def resolve_project(name, known):
+    for k in known:
+        if encode_project(k) == name:
+            return k
+    found = probe(Path("/"), name.split("-"), [10000])
+    return str(found) if found else None
+
+
+def folder_stats(d):
+    """(files, bytes) under d. Symlinks are counted as links, never followed."""
+    files = size = 0
+    for dirpath, _, names in os.walk(d, onerror=lambda e: None, followlinks=False):
+        for n in names:
+            try:
+                size += os.lstat(os.path.join(dirpath, n)).st_size
+                files += 1
+            except OSError:
+                continue
+    return files, size
+
+
+def scan_projects():
+    items = []
+    try:
+        dirs = sorted(d for d in PROJECTS_DIR.iterdir()
+                      if not d.name.startswith(".") and d.is_dir() and not d.is_symlink())
+    except OSError:
+        return items
+    known = known_folders()
+    for d in dirs:
+        name = d.name
+        orig, status, stale = None, "", False
+        if name == "empty-window":
+            pass
+        elif TEMP_NAME.fullmatch(name) or name.isdigit():
+            status, stale = "TEMP", True
+        else:
+            orig = resolve_project(name, known)
+            if orig is None:
+                status = "UNKNOWN"
+            elif not Path(orig).exists():
+                status, stale = "MISSING", True
+        files, size = folder_stats(d)
+        present = [s for s in PROJECT_SUBDIRS if (d / s).is_dir()]
+        detail = [f"Data folder: {d}"]
+        if status == "UNKNOWN":
+            detail.append("unknown, folder not found")
+        elif status == "TEMP":
+            detail.append("temporary or empty-window project, no folder behind it")
+        elif orig:
+            detail.append(f"Project: {orig}" + ("   [no longer exists]" if stale else ""))
+        detail.append("Holds: " + (", ".join(present) if present else "nothing known")
+                      + f"  ({files} files, {human(size)})")
+        badge = f"{human(size):>7}" + (f"  {status}" if status else "")
+        title = orig or name
+        items.append(Item("projdir", str(d), title, badge, detail, stale=stale,
+                          selected=stale, size=size, name=name,
+                          where=short_home(Path(orig).parent) if orig else short_home(PROJECTS_DIR),
+                          file=str(d), op="move"))
+    return items

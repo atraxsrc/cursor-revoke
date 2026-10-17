@@ -125,5 +125,90 @@ class TestSandboxRisks(unittest.TestCase):
                                            "disableTmpWrite": True}), [])
 
 
+class TestProjects(FakeHome):
+    def proj(self, name):
+        d = cr.PROJECTS_DIR / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "mcps").mkdir(exist_ok=True)
+        (d / "mcps" / "x.json").write_text("{}")
+        return d
+
+    def only(self, name):
+        got = [i for i in cr.scan_projects() if i.name == name]
+        self.assertEqual(len(got), 1, [i.name for i in cr.scan_projects()])
+        return got[0]
+
+    def workspace(self, folder_uri, n="a"):
+        self.write(f".config/Cursor/User/workspaceStorage/{n}/workspace.json", {"folder": folder_uri})
+
+    def test_known_folder_that_exists_is_ok(self):
+        app = self.home / "code" / "app"
+        app.mkdir(parents=True)
+        self.workspace("file://" + str(app))
+        self.proj(cr.encode_project(str(app)))
+        it = self.only(cr.encode_project(str(app)))
+        self.assertEqual((it.stale, it.selected), (False, False))
+        self.assertEqual((it.kind, it.op), ("projdir", "move"))
+        self.assertEqual(it.file, str(cr.PROJECTS_DIR / it.name))
+        self.assertGreater(it.size, 0)
+
+    def test_known_folder_that_is_gone_is_stale_and_ticked(self):
+        gone = self.home / "code" / "old app"
+        self.workspace("file://" + str(gone).replace(" ", "%20"))
+        self.proj(cr.encode_project(str(gone)))
+        it = self.only(cr.encode_project(str(gone)))
+        self.assertEqual((it.stale, it.selected), (True, True))
+        self.assertIn("MISSING", it.badge)
+        self.assertTrue(any(str(gone) in d for d in it.detail), it.detail)
+
+    def test_dash_in_name_resolves_by_disk_probe(self):
+        app = self.home / "code" / "my-app"
+        app.mkdir(parents=True)
+        self.proj(cr.encode_project(str(app)))
+        it = self.only(cr.encode_project(str(app)))
+        self.assertEqual((it.stale, it.selected), (False, False))
+        self.assertNotIn("UNKNOWN", it.badge)
+
+    def test_tmp_and_numeric_folders_are_stale(self):
+        self.proj("tmp-c317a0de-1b2c-4d3e-8f90-a1b2c3d4e5f6")
+        self.proj("1792207849851")
+        for n in ("tmp-c317a0de-1b2c-4d3e-8f90-a1b2c3d4e5f6", "1792207849851"):
+            it = self.only(n)
+            self.assertEqual((it.stale, it.selected), (True, True), n)
+            self.assertIn("TEMP", it.badge)
+
+    def test_unmatched_name_is_unknown_not_ticked(self):
+        self.proj("zz-nowhere-qq-9")
+        it = self.only("zz-nowhere-qq-9")
+        self.assertEqual((it.stale, it.selected), (False, False))
+        self.assertIn("UNKNOWN", it.badge)
+        self.assertIn("unknown, folder not found", it.detail)
+
+    def test_empty_window_and_dot_folders(self):
+        self.proj("empty-window")
+        self.proj(".hidden")
+        names = [i.name for i in cr.scan_projects()]
+        self.assertIn("empty-window", names)
+        self.assertNotIn(".hidden", names)
+        it = self.only("empty-window")
+        self.assertEqual((it.stale, it.selected), (False, False))
+
+    def test_missing_projects_dir_and_bad_json(self):
+        self.assertEqual(cr.scan_projects(), [])
+        self.write_text(".config/Cursor/User/workspaceStorage/a/workspace.json", "{nope")
+        self.write(".config/Cursor/User/globalStorage/storage.json",
+                   {"backupWorkspaces": {"folders": [{"folderUri": "vscode-remote://x/y"}]},
+                    "profileAssociations": {"workspaces": {"file:///home/user/p": "d"}}})
+        self.assertEqual(cr.known_folders(), {"/home/user/p"})
+
+    def test_symlink_not_followed_in_size(self):
+        d = self.proj("1792207849852")
+        big = self.home / "big"
+        big.mkdir()
+        (big / "f").write_bytes(b"x" * 5000)
+        os.symlink(big, d / "link")
+        self.assertLess(self.only("1792207849852").size, 5000)
+
+
 if __name__ == "__main__":
     unittest.main()
