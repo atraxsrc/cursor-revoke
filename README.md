@@ -32,6 +32,10 @@ Cursor's agent can run shell commands, read files, reach the network and call MC
 - **Theme-aware**: draws only with your terminal's own palette.
 - **Zero dependencies**: a single Python file using the standard library.
 
+<p align="center">
+  <img src="assets/screenshot-report.svg" alt="cursor-revoke --report output" width="92%">
+</p>
+
 ## Install
 
 ### Packages (Debian, Ubuntu, Pop!_OS, Fedora, Arch)
@@ -78,6 +82,8 @@ cursor-revoke --version                # print the version
 cursor-revoke --schedule weekly        # weekly check with a desktop notification (daily | off)
 cursor-revoke --notify                 # what the scheduled check runs: scan, summary, notification
 ```
+
+`--report` marks each item `!` risky, `x` stale or `#` locked (shown only), and ends each line with where it lives: `[global]` or the project path.
 
 Project folders are found by walking `--roots` (default: your home) for `.cursor/` directories. `~/.cursor/.cursor/` is treated as the project-level folder of the project `~/.cursor`, not as a second global one.
 
@@ -170,6 +176,11 @@ Everything removed lands in `~/.cursor-revoke-quarantine/<timestamp>/` together 
 python3 -m unittest discover -s tests   # runs against a temporary fake home folder
 packaging/build.sh                      # builds the .deb, .rpm and Arch packages into dist/
 ```
+
+## Roadmap
+
+- [ ] Secret scan of agent transcripts under `~/.cursor/projects/*/agent-transcripts`, and maybe chat history
+- [ ] A shared core with claude-revoke, if both tools grow together
 
 ## See also
 
