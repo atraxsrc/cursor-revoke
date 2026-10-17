@@ -71,6 +71,16 @@ class TestFilePermissions(FakeHome):
         cr.write_json_atomic(p, {})
         self.assertEqual(mode(p), 0o600)
 
+    def test_symlink_at_tmp_path_is_not_followed(self):
+        p = self.write("a.json", {"old": 1}, perms=0o600)
+        target = self.write_text("victim.txt", "keep me", perms=0o644)
+        os.symlink(target, str(p) + ".cursor-revoke.tmp")
+        cr.write_json_atomic(p, {"new": 2})
+        self.assertEqual(target.read_text(), "keep me")
+        self.assertEqual(mode(target), 0o644)
+        self.assertEqual(json.loads(p.read_text()), {"new": 2})
+        self.assertEqual(mode(p), 0o600)
+
 
 class TestItem(unittest.TestCase):
     def test_locked_defaults_false(self):

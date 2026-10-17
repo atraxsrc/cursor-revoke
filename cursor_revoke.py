@@ -117,11 +117,15 @@ def write_json_atomic(p, data):
     except OSError:
         mode = 0o600
     tmp = Path(str(p) + ".cursor-revoke.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.unlink(tmp)   # a stale (or planted) temp path; never write through it
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
         fh.write("\n")
-    os.chmod(tmp, mode)
+        os.fchmod(fh.fileno(), mode)
     os.replace(tmp, p)
 
 
