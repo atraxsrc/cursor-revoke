@@ -219,6 +219,11 @@ class TestProjects(FakeHome):
             self.proj(cr.encode_project(str(locked / "gone")))
             names = [i.name for i in cr.scan_projects()]
             self.assertEqual(len(names), 3)
+            it = self.only(cr.encode_project(str(locked / "gone")))
+            self.assertIn("UNKNOWN", it.badge)
+            self.assertNotIn("MISSING", it.badge)
+            self.assertEqual((it.stale, it.selected), (False, False))
+            self.assertTrue(any("could not be checked" in d for d in it.detail), it.detail)
         finally:
             os.chmod(locked, 0o755)
 

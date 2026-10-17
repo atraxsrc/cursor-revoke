@@ -244,11 +244,15 @@ def safe_is_dir(p):
         return False
 
 
-def safe_exists(p):
+def path_state(p):
+    """"exists", "missing" or "unknown" (cannot be checked, e.g. no permission)."""
     try:
-        return Path(p).exists()
-    except OSError:
-        return False
+        os.stat(p)
+        return "exists"
+    except (FileNotFoundError, NotADirectoryError):
+        return "missing"
+    except (OSError, ValueError):
+        return "unknown"
 
 
 def encode_project(path):
@@ -337,7 +341,7 @@ def scan_projects():
     known = known_folders()
     for d in dirs:
         name = d.name
-        orig, status, stale = None, "", False
+        orig, status, stale, unchecked = None, "", False, False
         if name == "empty-window":
             pass
         elif TEMP_NAME.fullmatch(name) or name.isdigit():
@@ -346,12 +350,18 @@ def scan_projects():
             orig = resolve_project(name, known)
             if orig is None:
                 status = "UNKNOWN"
-            elif not safe_exists(orig):
-                status, stale = "MISSING", True
+            else:
+                state = path_state(orig)
+                if state == "missing":
+                    status, stale = "MISSING", True
+                elif state == "unknown":
+                    status, unchecked = "UNKNOWN", True
         files, size = folder_stats(d)
-        present = [s for s in PROJECT_SUBDIRS if (d / s).is_dir()]
+        present = [s for s in PROJECT_SUBDIRS if safe_is_dir(d / s)]
         detail = [f"Data folder: {d}"]
-        if status == "UNKNOWN":
+        if unchecked:
+            detail.append(f"Project: {orig}   [could not be checked, no permission]")
+        elif status == "UNKNOWN":
             detail.append("unknown, folder not found")
         elif status == "TEMP":
             detail.append("temporary or empty-window project, no folder behind it")
