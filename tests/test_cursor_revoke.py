@@ -728,9 +728,17 @@ class TestReport(CliBase):
         for name in ("Agent permissions", "Sandbox settings", "MCP servers and hooks",
                      "Project data folders"):
             self.assertIn(name, r.stdout)
-        self.assertIn("! risky   ~ stale   # locked (shown only)", r.stdout)
+        self.assertIn("! risky   x stale   # locked (shown only)", r.stdout)
         self.assertTrue(any(l.startswith(" # ") for l in r.stdout.splitlines()), r.stdout)
         self.assertTrue(any(l.startswith(" ! ") for l in r.stdout.splitlines()), r.stdout)
+
+    def test_stale_marker_is_x_not_tilde(self):
+        # "~" would read like the start of a home path in the project list.
+        (self.home / ".cursor" / "projects" / "1792207849851").mkdir(parents=True)
+        r = self.run_cli("--report", "--roots", str(self.home))
+        lines = r.stdout.splitlines()
+        self.assertTrue(any(l.startswith(" x 1792207849851") for l in lines), r.stdout)
+        self.assertFalse(any(l.startswith(" ~ ") for l in lines), r.stdout)
 
     def test_report_names_where_each_config_item_lives(self):
         self.write(".cursor/sandbox.json", {"type": "workspace_readwrite"})

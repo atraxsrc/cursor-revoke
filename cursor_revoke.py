@@ -1094,7 +1094,7 @@ def print_report(cats, only="all"):
         for it in c.items:
             if not show_in(it, only):
                 continue
-            flag = "#" if it.locked else ("!" if it.risky else ("~" if it.stale else " "))
+            flag = "#" if it.locked else ("!" if it.risky else ("x" if it.stale else " "))
             line = f" {flag} {clean(it.title)}"
             if it.badge:
                 line += f"   {clean(it.badge)}"
@@ -1105,7 +1105,7 @@ def print_report(cats, only="all"):
             for d in it.detail[1:]:
                 if it.risky or it.stale or it.locked:
                     print(f"      {clean(d)}")
-    print("\nLegend: ! risky   ~ stale   # locked (shown only).  Run without --report to revoke.")
+    print("\nLegend: ! risky   x stale   # locked (shown only).  Run without --report to revoke.")
 
 
 def summarize(cats):
