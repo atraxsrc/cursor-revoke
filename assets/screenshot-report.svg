@@ -5,7 +5,7 @@
 <text x="18" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
 <text x="45" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">Agent</text>
 <text x="99" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="108" lengthAdjust="spacing">permissions:</text>
-<text x="216" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">6</text>
+<text x="216" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">5</text>
 <text x="234" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">found,</text>
 <text x="297" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">0</text>
 <text x="315" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">stale,</text>
@@ -72,31 +72,24 @@
 <text x="648" y="187" fill="#abb2bf" xml:space="preserve" textLength="45" lengthAdjust="spacing">rules</text>
 <text x="720" y="187" fill="#abb2bf" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
 <text x="27" y="206" fill="#6b717d" xml:space="preserve" textLength="9" lengthAdjust="spacing">#</text>
-<text x="45" y="206" fill="#6b717d" xml:space="preserve" textLength="171" lengthAdjust="spacing">block_instructions:</text>
-<text x="225" y="206" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Never</text>
-<text x="279" y="206" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">touch</text>
-<text x="333" y="206" fill="#6b717d" xml:space="preserve" textLength="36" lengthAdjust="spacing">prod</text>
-<text x="396" y="206" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
+<text x="45" y="206" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">auto-run</text>
+<text x="126" y="206" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">block</text>
+<text x="180" y="206" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">rules:</text>
+<text x="243" y="206" fill="#6b717d" xml:space="preserve" textLength="9" lengthAdjust="spacing">2</text>
+<text x="279" y="206" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
 <text x="72" y="225" fill="#6b717d" xml:space="preserve" textLength="90" lengthAdjust="spacing">Protective</text>
-<text x="171" y="225" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">rule,</text>
-<text x="225" y="225" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">shown</text>
-<text x="279" y="225" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">for</text>
-<text x="315" y="225" fill="#6b717d" xml:space="preserve" textLength="117" lengthAdjust="spacing">completeness.</text>
-<text x="441" y="225" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Never</text>
-<text x="495" y="225" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">removed.</text>
-<text x="27" y="244" fill="#6b717d" xml:space="preserve" textLength="9" lengthAdjust="spacing">#</text>
-<text x="45" y="244" fill="#6b717d" xml:space="preserve" textLength="171" lengthAdjust="spacing">block_instructions:</text>
-<text x="225" y="244" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">Ask</text>
-<text x="261" y="244" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">before</text>
-<text x="324" y="244" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">deleting</text>
-<text x="423" y="244" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
-<text x="72" y="263" fill="#6b717d" xml:space="preserve" textLength="90" lengthAdjust="spacing">Protective</text>
-<text x="171" y="263" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">rule,</text>
-<text x="225" y="263" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">shown</text>
-<text x="279" y="263" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">for</text>
-<text x="315" y="263" fill="#6b717d" xml:space="preserve" textLength="117" lengthAdjust="spacing">completeness.</text>
-<text x="441" y="263" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Never</text>
-<text x="495" y="263" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">removed.</text>
+<text x="171" y="225" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">rules,</text>
+<text x="234" y="225" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">shown</text>
+<text x="288" y="225" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">for</text>
+<text x="324" y="225" fill="#6b717d" xml:space="preserve" textLength="117" lengthAdjust="spacing">completeness.</text>
+<text x="450" y="225" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Never</text>
+<text x="504" y="225" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">removed.</text>
+<text x="90" y="244" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Never</text>
+<text x="144" y="244" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">touch</text>
+<text x="198" y="244" fill="#6b717d" xml:space="preserve" textLength="36" lengthAdjust="spacing">prod</text>
+<text x="90" y="263" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">Ask</text>
+<text x="126" y="263" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">before</text>
+<text x="189" y="263" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">deleting</text>
 <text x="18" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
 <text x="45" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="63" lengthAdjust="spacing">Sandbox</text>
 <text x="117" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="81" lengthAdjust="spacing">settings:</text>
