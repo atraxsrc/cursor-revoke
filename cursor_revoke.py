@@ -109,6 +109,75 @@ def str_list(v):
     return [x for x in as_list(v) if isinstance(x, str)]
 
 
+SANDBOX_DEFAULTS = {"type": "workspace_readwrite", "readBoundary": "system",
+                    "networkPolicy.default": "deny"}
+SANDBOX_PATH_KEYS = ("additionalReadwritePaths", "additionalReadonlyPaths", "additionalReadPaths")
+SENSITIVE_DIRS = ("~/.ssh", "~/.aws", "~/.gnupg", "~/.config")
+RISKY_SHELL_BASES = {"sudo", "su", "bash", "sh", "zsh", "fish", "env", "eval", "xargs",
+                     "python", "python3", "node", "perl", "ruby", "curl", "wget", "rm",
+                     "dd", "chmod", "chown"}
+
+
+def broad_path(p):
+    """True for a path that reaches the whole disk, the home folder (or a parent
+    of it) or a credentials folder. Relative project paths are fine."""
+    p = p.strip()
+    home = str(HOME).rstrip("/")
+    if home and (p == home or p.startswith(home + "/")):
+        p = "~" + p[len(home):]
+    if p in ("", "/", "~", "~/", "**", "/**", "~/**", "*"):
+        return True
+    if p.startswith("/") and not p.startswith("~"):
+        flat = p.rstrip("/*")
+        if flat == "" or home == flat or home.startswith(flat + "/"):
+            return True
+    return any(p == d or p.startswith(d + "/") for d in SENSITIVE_DIRS)
+
+
+def is_broad(rule):
+    """True for a Cursor permission token that grants too much."""
+    r = rule.replace(" ", "")
+    m = re.fullmatch(r"(\w+)(?:\((.*)\))?", r, re.S)
+    if not m:
+        return False
+    tool, arg = m.group(1), m.group(2)
+    if tool in ("Shell", "Read", "Write", "Mcp"):
+        if arg is None or arg in ("*", "**", ":*"):
+            return True
+    if tool == "Shell":
+        base = re.split(r"[:\s]", rule.strip()[6:-1].strip(), 1)[0]
+        return base in RISKY_SHELL_BASES
+    if tool in ("Read", "Write"):
+        return broad_path(arg)
+    if tool == "Mcp":
+        return arg.endswith(":*")
+    return False
+
+
+def sandbox_risks(data):
+    """Risky sandbox fields as (jpath, op, value, reason). op is "reset"
+    (value = default to write) or "drop_entry" (value = entry to remove)."""
+    out = []
+    data = as_dict(data)
+    if data.get("type") == "insecure_none":
+        out.append((["type"], "reset", SANDBOX_DEFAULTS["type"],
+                    "sandbox is switched off"))
+    net = as_dict(data.get("networkPolicy"))
+    if net.get("default") == "allow":
+        out.append((["networkPolicy", "default"], "reset", "deny",
+                    "all network traffic is allowed by default"))
+    for e in str_list(net.get("allow")):
+        if e.strip() in ("*", "*.*", "0.0.0.0/0"):
+            out.append((["networkPolicy", "allow"], "drop_entry", e,
+                        "allows network access to every host"))
+    for key in SANDBOX_PATH_KEYS:
+        for e in str_list(data.get(key)):
+            if broad_path(e):
+                out.append(([key], "drop_entry", e,
+                            "gives the sandbox access to the home folder or secrets"))
+    return out
+
+
 def write_json_atomic(p, data):
     # Keep the original file's permissions (config files are often 0600);
     # files that don't exist yet are created private.

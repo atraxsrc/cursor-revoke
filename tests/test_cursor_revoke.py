@@ -90,5 +90,40 @@ class TestItem(unittest.TestCase):
         self.assertEqual(it.jpath, [])
 
 
+class TestIsBroad(unittest.TestCase):
+    def test_broad(self):
+        for r in ["Shell(*)", "Shell", "Shell(sudo)", "Shell(bash)", "Shell(curl)",
+                  "Shell(python3)", "Read(**)", "Write(**)", "Write(~/**)",
+                  "Read(~/.ssh/**)", "Read(/**)", "Mcp(*)", "Mcp(github:*)"]:
+            self.assertTrue(cr.is_broad(r), r)
+
+    def test_narrow(self):
+        for r in ["Shell(ls)", "Shell(git)", "Read(src/**)", "Write(docs/*.md)", "Mcp(github:list_issues)"]:
+            self.assertFalse(cr.is_broad(r), r)
+
+
+class TestSandboxRisks(unittest.TestCase):
+    def test_reference_install_file_is_fine(self):
+        data = {"type": "workspace_readwrite", "readBoundary": "workspace", "additionalReadPaths": [],
+                "disableTmpWrite": False, "networkPolicy": {"default": "deny", "allow": [], "deny": []}}
+        self.assertEqual(cr.sandbox_risks(data), [])
+
+    def test_wide_fields(self):
+        data = {"type": "insecure_none", "networkPolicy": {"default": "allow", "allow": ["*", "pypi.org"]},
+                "additionalReadwritePaths": ["~", "build"], "additionalReadPaths": ["~/.ssh"]}
+        got = {(tuple(p), op, json.dumps(v)) for p, op, v, _ in cr.sandbox_risks(data)}
+        self.assertEqual(got, {
+            (("type",), "reset", '"workspace_readwrite"'),
+            (("networkPolicy", "default"), "reset", '"deny"'),
+            (("networkPolicy", "allow"), "drop_entry", '"*"'),
+            (("additionalReadwritePaths",), "drop_entry", '"~"'),
+            (("additionalReadPaths",), "drop_entry", '"~/.ssh"'),
+        })
+
+    def test_never_flags_stricter_or_default_values(self):
+        self.assertEqual(cr.sandbox_risks({"type": "workspace_readonly", "readBoundary": "system",
+                                           "disableTmpWrite": True}), [])
+
+
 if __name__ == "__main__":
     unittest.main()
