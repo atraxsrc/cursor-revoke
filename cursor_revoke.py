@@ -233,7 +233,22 @@ def fmt_date(ts):
 
 # --------------------------------------------------------------------------- projects
 PROJECT_SUBDIRS = ("mcps", "agent-transcripts", "terminals", "canvases")
-TEMP_NAME = re.compile(r"tmp-[0-9a-fA-F][0-9a-fA-F-]{6,}")
+TEMP_NAME = re.compile(r"tmp-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                       re.I)
+
+
+def safe_is_dir(p):
+    try:
+        return Path(p).is_dir()
+    except OSError:
+        return False
+
+
+def safe_exists(p):
+    try:
+        return Path(p).exists()
+    except OSError:
+        return False
 
 
 def encode_project(path):
@@ -284,7 +299,7 @@ def probe(base, parts, budget):
             if budget[0] < 0:
                 return None
             seg = base / sep.join(parts[:k])
-            if seg.is_dir():
+            if safe_is_dir(seg):
                 found = probe(seg, parts[k:], budget)
                 if found:
                     return found
@@ -331,7 +346,7 @@ def scan_projects():
             orig = resolve_project(name, known)
             if orig is None:
                 status = "UNKNOWN"
-            elif not Path(orig).exists():
+            elif not safe_exists(orig):
                 status, stale = "MISSING", True
         files, size = folder_stats(d)
         present = [s for s in PROJECT_SUBDIRS if (d / s).is_dir()]

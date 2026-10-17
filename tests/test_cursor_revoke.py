@@ -201,6 +201,27 @@ class TestProjects(FakeHome):
                     "profileAssociations": {"workspaces": {"file:///home/user/p": "d"}}})
         self.assertEqual(cr.known_folders(), {"/home/user/p"})
 
+    def test_short_tmp_name_is_not_temp(self):
+        self.proj("tmp-deadbeef")
+        it = self.only("tmp-deadbeef")
+        self.assertNotIn("TEMP", it.badge)
+        self.assertEqual((it.stale, it.selected), (False, False))
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores permissions")
+    def test_unreadable_ancestor_does_not_crash(self):
+        locked = self.home / "locked"
+        (locked / "inner").mkdir(parents=True)
+        os.chmod(locked, 0o000)
+        try:
+            self.proj(cr.encode_project(str(locked / "inner")))
+            self.proj("zz-" + cr.encode_project(str(locked / "inner")))
+            self.workspace("file://" + str(locked / "gone"))
+            self.proj(cr.encode_project(str(locked / "gone")))
+            names = [i.name for i in cr.scan_projects()]
+            self.assertEqual(len(names), 3)
+        finally:
+            os.chmod(locked, 0o755)
+
     def test_symlink_not_followed_in_size(self):
         d = self.proj("1792207849852")
         big = self.home / "big"
