@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -847,6 +848,77 @@ class TestReportControlChars(CliBase):
         self.assertIn(b"node?fake", r.stdout)
         for bad in (b"\x1b", b"\r", b"\x07"):
             self.assertNotIn(bad, r.stdout)
+
+
+class FakeScreen:
+    """Just enough of a curses window for App: records every string drawn."""
+
+    def __init__(self, keys, h=40, w=140):
+        self.keys, self.h, self.w, self.drawn = list(keys), h, w, []
+
+    def getmaxyx(self):
+        return self.h, self.w
+
+    def addstr(self, y, x, s, attr=0):
+        self.drawn.append(s)
+
+    def erase(self):
+        pass
+
+    def getch(self):
+        return self.keys.pop(0) if self.keys else 27
+
+
+class TestTuiDrawing(unittest.TestCase):
+    BAD = "\x1b[2K\r\x07"
+
+    def app(self, keys):
+        it = cr.Item("mcp", "k", f"MCP server: ev{self.BAD}il", badge=f"B{self.BAD}",
+                     where=f"~/code/x{self.BAD}y", file="/home/user/.cursor/mcp.json",
+                     jpath=["mcpServers"], value=f"ev{self.BAD}il", op="pop_key", risky=True,
+                     selected=True, detail=[f"In /x{self.BAD}", f"Runs: node{self.BAD}"])
+        app = cr.App.__new__(cr.App)
+        app.scr, app.cats, app.dry_run, app.final, app.colors = (
+            FakeScreen(keys), [cr.Category("MCP servers and hooks", "help", [it])], True, [], False)
+        return app
+
+    def assert_clean(self, drawn):
+        for ch in "".join(drawn):
+            self.assertNotEqual(unicodedata.category(ch)[0], "C", repr(ch))
+
+    def test_checklist_row_and_detail_are_sanitized(self):
+        app = self.app([ord("j"), 27])   # move onto the item row (detail pane), then back
+        app.checklist(app.cats[0])
+        text = "".join(app.scr.drawn)
+        self.assertIn("ev?[2K??il", text)
+        self.assertIn("Runs: node?[2K??", text)
+        self.assert_clean(app.scr.drawn)
+
+    def test_review_lines_are_sanitized(self):
+        app = self.app([ord("q")])
+        with mock.patch.object(cr, "running_cursor", return_value=[]):
+            self.assertIsNone(app.review())
+        self.assertIn("Remove MCP server: ev?[2K??il", "".join(app.scr.drawn))
+        self.assert_clean(app.scr.drawn)
+
+
+class TestRestoreOutput(FakeHome):
+    def test_restore_output_has_no_escape(self):
+        bad = "ev\x1b[2Kil"
+        self.write(f"code/{bad}/.cursor/cli.json", {"permissions": {"allow": ["Shell(curl)"]}})
+        self.write(f".cursor/projects/{bad}/terminals/1.txt", {})
+        items = [i for c in cr.scan_all([self.home]) for i in c.items]
+        hit = [i for i in items if "\x1b" in i.file]
+        self.assertEqual({i.op for i in hit}, {"drop_entry", "move"})
+        cr.tick(hit, lambda it: True, True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            cr.apply_plan(hit)
+        out = self.restore_latest()
+        self.assertIn("put 1 entry back", out)
+        self.assertIn("OK   restored", out)
+        self.assertIn("ev?[2Kil", out)
+        self.assertNotIn("\x1b", out)
+        self.assertTrue((self.home / ".cursor/projects" / bad / "terminals/1.txt").exists())
 
 
 if __name__ == "__main__":

@@ -901,15 +901,15 @@ def restore(qdir):
     qdir = Path(qdir)
     manifest = load_json(qdir / "manifest.json")
     if not isinstance(manifest, dict):
-        sys.exit(f"No manifest.json in {qdir}")
+        sys.exit(clean(f"No manifest.json in {qdir}"))
     for m in reversed(as_list(manifest.get("moves"))):
         src, dest = Path(m["quarantined"]), Path(m["original"])
         if os.path.lexists(dest):
-            print(f"SKIP {dest} already exists")
+            print(clean(f"SKIP {dest} already exists"))
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dest))
-        print(f"OK   restored {dest}")
+        print(clean(f"OK   restored {dest}"))
     # Removed JSON entries go back into the file as it is NOW, so whatever Cursor
     # wrote since the run is kept. The full backup is only used when the file
     # is gone. A file that exists but no longer parses is never overwritten.
@@ -924,23 +924,23 @@ def restore(qdir):
             n = sum(put_back(data, e) for e in reversed(edits[file]))
             if n:
                 write_json_atomic(Path(file), data)
-            print(f"OK   put {n} entr{'y' if n == 1 else 'ies'} back into {file}")
+            print(clean(f"OK   put {n} entr{'y' if n == 1 else 'ies'} back into {file}"))
         elif file in backups and not os.path.lexists(file):
             # Nothing at all at the path (not even a dangling symlink): write
             # the backup's content without following links.
             old = load_json(backups[file])
             if not isinstance(old, dict):
-                print(f"SKIP {file}: backup {backups[file]} is unreadable")
+                print(clean(f"SKIP {file}: backup {backups[file]} is unreadable"))
                 continue
             Path(file).parent.mkdir(parents=True, exist_ok=True)
             write_json_atomic(Path(file), old)
-            print(f"OK   restored {file} from backup")
+            print(clean(f"OK   restored {file} from backup"))
         elif file in backups and os.path.islink(file):
-            print(f"SKIP {file}: a symlink is in the way, not touched; the old copy is {backups[file]}")
+            print(clean(f"SKIP {file}: a symlink is in the way, not touched; the old copy is {backups[file]}"))
         elif file in backups:
-            print(f"SKIP {file}: unreadable, not touched; the old copy is {backups[file]}")
+            print(clean(f"SKIP {file}: unreadable, not touched; the old copy is {backups[file]}"))
         else:
-            print(f"SKIP {file}: missing or unreadable and no backup in {qdir}")
+            print(clean(f"SKIP {file}: missing or unreadable and no backup in {qdir}"))
 
 
 # --------------------------------------------------------------------------- running Cursor
