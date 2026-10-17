@@ -236,5 +236,164 @@ class TestProjects(FakeHome):
         self.assertLess(self.only("1792207849852").size, 5000)
 
 
+REF_CLI = {"version": 1, "permissions": {"allow": ["Shell(ls)"], "deny": []},
+           "approvalMode": "allowlist",
+           "sandbox": {"mode": "disabled", "networkAccess": "user_config_with_defaults"}}
+REF_PERMS = {"autoRun": {"allow_instructions": [], "block_instructions": ["no rm", "no push"]}}
+REF_SANDBOX = {"type": "workspace_readwrite", "readBoundary": "workspace", "additionalReadPaths": [],
+               "disableTmpWrite": False, "networkPolicy": {"default": "deny", "allow": [], "deny": []}}
+
+
+class TestScan(FakeHome):
+    def items(self, roots=None):
+        cats = cr.scan_all(roots or [self.home])
+        return [i for c in cats for i in c.items]
+
+    def kinds(self, items, kind):
+        return [i for i in items if i.kind == kind]
+
+    def test_reference_install(self):
+        self.write(".cursor/cli-config.json", REF_CLI)
+        self.write(".cursor/permissions.json", REF_PERMS)
+        self.write(".cursor/sandbox.json", REF_SANDBOX)
+        items = self.items()
+        allow = self.kinds(items, "allow")
+        self.assertEqual([(i.value, i.risky) for i in allow], [("Shell(ls)", False)])
+        self.assertEqual((allow[0].op, allow[0].jpath), ("drop_entry", ["permissions", "allow"]))
+        approval = self.kinds(items, "approval")
+        self.assertEqual([(i.locked, i.risky) for i in approval], [(True, False)])
+        block = self.kinds(items, "block")
+        self.assertEqual(len(block), 1)
+        self.assertTrue(block[0].locked)
+        sandbox = self.kinds(items, "sandbox")
+        self.assertEqual(len(sandbox), 1)
+        self.assertTrue(sandbox[0].locked)
+        self.assertIn("at or stricter than Cursor's defaults", sandbox[0].title)
+        self.assertEqual(self.kinds(items, "unknown"), [])
+        self.assertFalse(any(i.selected for i in items if i.locked))
+        self.assertEqual(len({i.key for i in items}), len(items))
+
+    def test_categories_in_order(self):
+        names = [c.name for c in cr.scan_all([self.home])]
+        self.assertEqual(names, ["Agent permissions", "Sandbox settings",
+                                 "MCP servers and hooks", "Project data folders"])
+
+    def test_project_files_are_found_and_labelled(self):
+        base = "code/app/.cursor/"
+        self.write(base + "cli.json", {"permissions": {"allow": ["Shell(curl)"], "deny": ["Read(x)"]}})
+        self.write(base + "permissions.json", {"autoRun": {"allow_instructions": ["run tests"]}})
+        self.write(base + "sandbox.json", {"networkPolicy": {"default": "allow"}})
+        self.write(base + "mcp.json", {"mcpServers": {"github": {"command": "npx", "args": ["gh-mcp"]}}})
+        self.write(base + "hooks.json", {"version": 1, "hooks": {"beforeShellExecution": [{"command": "./audit.sh"}]}})
+        items = self.items()
+        for name in ("cli.json", "permissions.json", "sandbox.json", "mcp.json", "hooks.json"):
+            f = str(self.home / base / name)
+            got = [i for i in items if i.file == f]
+            self.assertTrue(got, name)
+            for i in got:
+                self.assertEqual(i.where, "~/code/app", (name, i.title))
+        by = {i.kind: i for i in items if i.where == "~/code/app"}
+        self.assertTrue(by["allow"].risky)
+        self.assertTrue(by["deny"].locked)
+        self.assertEqual((by["autorun"].value, by["autorun"].op, by["autorun"].risky),
+                         ("run tests", "drop_entry", True))
+        self.assertEqual((by["sandbox"].jpath, by["sandbox"].op, by["sandbox"].value),
+                         (["networkPolicy", "default"], "reset", "deny"))
+        self.assertEqual((by["mcp"].title, by["mcp"].op, by["mcp"].jpath, by["mcp"].value),
+                         ("MCP server: github", "pop_key", ["mcpServers"], "github"))
+        self.assertTrue(any("npx gh-mcp" in d for d in by["mcp"].detail), by["mcp"].detail)
+        self.assertEqual((by["hook"].op, by["hook"].jpath, by["hook"].value),
+                         ("pop_key", ["hooks"], "beforeShellExecution"))
+        self.assertTrue(any("./audit.sh" in d for d in by["hook"].detail), by["hook"].detail)
+        self.assertFalse(any(i.selected for i in items))
+
+    def test_jsonc_file_is_unknown_and_untouched(self):
+        text = '{"mcpServers": {}, // note\n}'
+        p = self.write_text(".cursor/mcp.json", text)
+        before = p.read_bytes()
+        items = [i for i in self.items() if i.file == str(p)]
+        self.assertEqual(len(items), 1)
+        self.assertEqual((items[0].kind, items[0].locked, items[0].op), ("unknown", True, ""))
+        self.assertIn("unknown format, not touched", items[0].title)
+        self.assertEqual(p.read_bytes(), before)
+
+    def test_missing_files_give_no_items(self):
+        self.write(".cursor/cli-config.json", {"permissions": {"deny": list(cr.DENY_RULES)}})
+        items = self.items()
+        self.assertEqual({(i.kind, i.file) for i in items}, {("deny", str(cr.GLOBAL_CLI))})
+
+    def test_harden_global_only(self):
+        self.write(".cursor/cli-config.json", {"permissions": {"deny": ["Read(~/.ssh/**)"]}})
+        self.write("code/app/.cursor/cli.json", {"permissions": {"deny": []}})
+        h = self.kinds(self.items(), "harden")
+        self.assertEqual(len(h), 1)
+        h = h[0]
+        self.assertEqual(h.title, "HARDEN: stop the Cursor CLI agent reading keys and .env files")
+        self.assertEqual((h.file, h.jpath, h.op, h.locked, h.selected),
+                         (str(cr.GLOBAL_CLI), ["permissions", "deny"], "harden", False, False))
+        self.assertEqual(h.value, [r for r in cr.DENY_RULES if r != "Read(~/.ssh/**)"])
+        self.assertTrue(any("CLI agent only" in d for d in h.detail), h.detail)
+
+    def test_harden_when_global_file_missing(self):
+        h = self.kinds(self.items(), "harden")
+        self.assertEqual(len(h), 1)
+        self.assertEqual(h[0].value, cr.DENY_RULES)
+
+    def test_risky_approval_mode(self):
+        self.write(".cursor/cli-config.json", {"approvalMode": "yolo"})
+        a = self.kinds(self.items(), "approval")
+        self.assertEqual([(i.locked, i.risky) for i in a], [(True, True)])
+        self.assertTrue(any("change this in Cursor's settings" in d for d in a[0].detail))
+
+    def test_other_permission_lists(self):
+        self.write(".cursor/permissions.json", {
+            "autoRun": {"allow_instructions": [], "block_instructions": []},
+            "mcpAllowlist": ["github:list_issues", 3],
+            "terminalAllowlist": ["git status"],
+            "terminalBlocklist": ["rm"],
+            "weird": {"a": 1},
+        })
+        items = self.items()
+        allow = {i.value: i for i in self.kinds(items, "allow")}
+        self.assertEqual(set(allow), {"git status"})
+        self.assertTrue(allow["git status"].risky)
+        self.assertEqual((allow["git status"].jpath, allow["git status"].op),
+                         (["terminalAllowlist"], "drop_entry"))
+        removable = [i for i in items if i.op]
+        self.assertFalse(any(i.value == "rm" for i in removable))
+        notes = " ".join(d for i in items for d in i.detail)
+        self.assertIn("weird", notes)
+        self.assertIn("mcpAllowlist", notes)
+        block = self.kinds(items, "block")
+        self.assertEqual([(i.value, i.locked) for i in block], [("rm", True)])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores permissions")
+    def test_walk_skips_symlinks_and_unreadable(self):
+        (self.home / "code" / "app" / ".cursor").mkdir(parents=True)
+        (self.home / "code" / "lib" / ".cursor").mkdir(parents=True)
+        os.symlink(self.home / "code", self.home / "link")
+        locked = self.home / "locked"
+        (locked / ".cursor").mkdir(parents=True)
+        os.chmod(locked, 0o000)
+        try:
+            got = cr.find_cursor_dirs([self.home])
+        finally:
+            os.chmod(locked, 0o755)
+        self.assertEqual(got, [self.home / "code" / "app" / ".cursor",
+                               self.home / "code" / "lib" / ".cursor"])
+
+    def test_dot_cursor_inside_global_dir(self):
+        self.write(".cursor/.cursor/sandbox.json", REF_SANDBOX)
+        dirs = cr.find_cursor_dirs([self.home])
+        self.assertIn(self.home / ".cursor" / ".cursor", dirs)
+        self.assertNotIn(self.home / ".cursor", dirs)
+        f = str(self.home / ".cursor" / ".cursor" / "sandbox.json")
+        got = [i for i in self.items() if i.file == f]
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0].where, "~/.cursor")
+        self.assertEqual(cr.find_cursor_dirs([self.home / "nowhere"]),
+                         [self.home / ".cursor" / ".cursor"])
+
+
 if __name__ == "__main__":
     unittest.main()

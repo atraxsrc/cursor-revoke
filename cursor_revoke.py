@@ -376,3 +376,263 @@ def scan_projects():
                           where=short_home(Path(orig).parent) if orig else short_home(PROJECTS_DIR),
                           file=str(d), op="move"))
     return items
+
+
+# --------------------------------------------------------------------------- config files
+DENY_RULES = ["Read(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.gnupg/**)", "Read(**/.env)",
+              "Read(**/.env.*)", "Read(**/*.pem)", "Read(**/*.key)"]
+PROJECT_FILES = ("cli.json", "permissions.json", "sandbox.json", "mcp.json", "hooks.json")
+
+
+def find_cursor_dirs(roots):
+    """Every real <project>/.cursor dir under the roots, sorted. ~/.cursor itself
+    is the global folder, but ~/.cursor/.cursor is the project ~/.cursor's."""
+    found = {}
+
+    def add(cdir):
+        try:
+            if cdir.is_symlink() or not cdir.is_dir():
+                return
+            real = cdir.resolve()
+        except (OSError, RuntimeError):
+            return
+        if real == global_dir:
+            return
+        found.setdefault(real, cdir)
+
+    try:
+        global_dir = CURSOR_DIR.resolve()
+    except (OSError, RuntimeError):
+        global_dir = CURSOR_DIR
+    for root in roots:
+        root = Path(root).expanduser()
+        for dirpath, dirnames, _ in os.walk(root, onerror=lambda e: None, followlinks=False):
+            skip = SKIP_DIRS | SKIP_ROOT_DIRS if dirpath == "/" else SKIP_DIRS
+            dirnames[:] = [d for d in dirnames if d not in skip]
+            if ".cursor" in dirnames:
+                dirnames.remove(".cursor")
+                add(Path(dirpath) / ".cursor")
+    add(CURSOR_DIR / ".cursor")
+    return sorted(found.values())
+
+
+def load_config(file):
+    """(data, items): items holds one locked "unknown" item when the file exists
+    but is not a JSON object (JSONC, broken, unreadable). Missing file: (None, [])."""
+    data = load_json(file)
+    if isinstance(data, dict):
+        return data, []
+    if data is None and path_state(file) == "missing":
+        return None, []
+    return None, [unknown_item(file, None)]
+
+
+def unknown_item(file, scope, what=""):
+    title = f"{short_home(file)}: {what + ' ' if what else ''}unknown format, not touched"
+    return Item("unknown", f"{file}::unknown", title,
+                detail=[f"File: {file}",
+                        "Not a plain JSON object (comments, trailing commas or a wrong type?).",
+                        "cursor-revoke never rewrites a file it cannot parse."],
+                name=title, where=scope or "", file=str(file), locked=True)
+
+
+def mk(kind, file, scope, jpath, value, title, **kw):
+    kw.setdefault("key", f"{file}::{'/'.join(jpath)}::{value}")
+    return Item(kind, kw.pop("key"), title, name=title, where=scope, file=str(file),
+                jpath=list(jpath), value=value, **kw)
+
+
+def unique(entries):
+    return list(dict.fromkeys(entries))
+
+
+def scan_cli(file, scope):
+    """cli-config.json (global) or <project>/.cursor/cli.json."""
+    data, items = load_config(file)
+    if items:
+        items[0].where = scope
+        return items
+    is_global = Path(file) == Path(GLOBAL_CLI)
+    if data is None and not is_global:
+        return []
+    data = data or {}
+    where = f"In {file}" + (" (applies in every project)" if is_global else "")
+    perms = as_dict(data.get("permissions"))
+    for r in unique(str_list(perms.get("allow"))):
+        broad = is_broad(r)
+        items.append(mk("allow", file, scope, ["permissions", "allow"], r, f"allow rule: {r}",
+                        badge="BROAD" if broad else "", risky=broad, op="drop_entry",
+                        detail=[where, "The agent may do this without asking."
+                                + ("  This rule grants a lot." if broad else "")]))
+    deny = str_list(perms.get("deny"))
+    for r in unique(deny):
+        items.append(mk("deny", file, scope, ["permissions", "deny"], r, f"deny rule: {r}",
+                        locked=True, detail=[where, "Protective rule, shown for completeness. Never removed."]))
+    if "approvalMode" in data:
+        mode = data.get("approvalMode")
+        risky = mode != "allowlist"
+        items.append(mk("approval", file, scope, ["approvalMode"], mode, f"approval mode: {mode}",
+                        badge="RISKY" if risky else "", risky=risky, locked=True,
+                        detail=[where, "Only \"allowlist\" is known to ask before running other commands."
+                                if risky else "Agent asks before anything outside the allow list.",
+                                "change this in Cursor's settings (cursor-revoke does not rewrite it)"]))
+    if is_global:
+        missing = [r for r in DENY_RULES if r not in deny]
+        if missing:
+            items.append(mk("harden", file, scope, ["permissions", "deny"], missing,
+                            "HARDEN: stop the Cursor CLI agent reading keys and .env files",
+                            badge=f"+{len(missing)} rules", op="harden",
+                            detail=[f"Adds deny rules to {file} (does not remove anything).",
+                                    "Confirmed for the Cursor CLI agent only; it may not protect "
+                                    "the editor or the Agents Window."] + missing))
+    return items
+
+
+def scan_autorun(file, scope):
+    """permissions.json: auto-run allow/block instructions and other allowlists."""
+    data, items = load_config(file)
+    if items:
+        items[0].where = scope
+        return items
+    if data is None:
+        return []
+    where = f"In {file}"
+    other = []
+    for key, val in data.items():
+        if key == "autoRun" and isinstance(val, dict):
+            for sub in val:
+                if sub not in ("allow_instructions", "block_instructions"):
+                    other.append(f"autoRun.{sub}")
+            for e in unique(str_list(val.get("allow_instructions"))):
+                items.append(mk("autorun", file, scope, ["autoRun", "allow_instructions"], e,
+                                f"auto-run rule: {e}", badge="AUTO-RUN", risky=True, op="drop_entry",
+                                detail=[where, "The agent runs matching commands without asking."]))
+            block = str_list(val.get("block_instructions"))
+            if block:
+                items.append(mk("block", file, scope, ["autoRun", "block_instructions"], len(block),
+                                f"auto-run block rules: {len(block)}", locked=True,
+                                detail=[where, "Protective rules, shown for completeness. Never removed."]
+                                + [f"  {b}" for b in block[:5]]
+                                + ([f"  ... and {len(block) - 5} more"] if len(block) > 5 else [])))
+        elif (isinstance(val, list) and val and all(isinstance(e, str) for e in val)):
+            # Key names are unverified. A block/deny list is protective: show, never remove.
+            protective = any(w in key.lower() for w in ("block", "deny", "disallow"))
+            for e in unique(val):
+                if protective:
+                    items.append(mk("block", file, scope, [key], e, f"{key}: {e}", locked=True,
+                                    detail=[where, "Protective rule, shown for completeness. Never removed."]))
+                else:
+                    items.append(mk("allow", file, scope, [key], e, f"{key}: {e}", badge="AUTO-RUN",
+                                    risky=True, op="drop_entry",
+                                    detail=[where, "Allowlist entry: the agent may use this without asking."]))
+        elif not (isinstance(val, list) and not val):
+            other.append(key)
+    if other:
+        items.append(mk("other", file, scope, [], None, f"other keys left alone: {', '.join(other)}",
+                        key=f"{file}::other", locked=True,
+                        detail=[where, "Not recognised, so not touched: " + ", ".join(other)]))
+    return items
+
+
+def sandbox_title(data, jpath, value):
+    if jpath == ["type"]:
+        return f"sandbox: type {data.get('type')} (sandbox off)"
+    if jpath == ["networkPolicy", "default"]:
+        return "sandbox: network default allow"
+    if jpath == ["networkPolicy", "allow"]:
+        return f"sandbox: network allow {value}"
+    return f"sandbox: {jpath[-1]} {value}"
+
+
+def scan_sandbox(file, scope):
+    data, items = load_config(file)
+    if items:
+        items[0].where = scope
+        return items
+    if data is None:
+        return []
+    where = f"In {file}"
+    for jpath, op, value, reason in sandbox_risks(data):
+        fix = (f"Removing resets it to Cursor's default: {value}" if op == "reset"
+               else "Removing drops just this entry.")
+        items.append(mk("sandbox", file, scope, jpath, value, sandbox_title(data, jpath, value),
+                        badge="WIDE", risky=True, op=op, detail=[where, reason, fix]))
+    if not items:
+        items.append(mk("sandbox", file, scope, [], None,
+                        "sandbox settings at or stricter than Cursor's defaults",
+                        key=f"{file}::ok", locked=True,
+                        detail=[where, "Nothing wider than Cursor's defaults. Never deleted: "
+                                "removing a stricter file would widen access."]))
+    return items
+
+
+def scan_mcp(file, scope):
+    data, items = load_config(file)
+    if items:
+        items[0].where = scope
+        return items
+    if data is None:
+        return []
+    servers = data.get("mcpServers", {})
+    if not isinstance(servers, dict):
+        return [unknown_item(file, scope, "mcpServers")]
+    for name, cfg in servers.items():
+        cfg = as_dict(cfg)
+        if cfg.get("url"):
+            runs = f"URL: {cfg.get('url')}"
+        else:
+            args = " ".join(str(a) for a in as_list(cfg.get("args")))
+            runs = f"Runs: {cfg.get('command') or '?'} {args}".rstrip()
+        items.append(mk("mcp", file, scope, ["mcpServers"], name, f"MCP server: {name}",
+                        risky=True, op="pop_key",
+                        detail=[f"In {file}", runs, "The agent can call this server's tools."]))
+    return items
+
+
+def scan_hooks(file, scope):
+    data, items = load_config(file)
+    if items:
+        items[0].where = scope
+        return items
+    if data is None:
+        return []
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return [unknown_item(file, scope, "hooks")]
+    for event, entries in hooks.items():
+        cmds = []
+        for e in as_list(entries):
+            if isinstance(e, str):
+                cmds.append(e)
+            elif isinstance(as_dict(e).get("command"), str):
+                cmds.append(e["command"])
+        shown = [f"  {c}" for c in cmds] or ["  " + json.dumps(entries)[:300]]
+        items.append(mk("hook", file, scope, ["hooks"], event, f"hook: {event}",
+                        risky=True, op="pop_key",
+                        detail=[f"In {file}", "Runs commands automatically on this Cursor event:"]
+                        + shown))
+    return items
+
+
+def scan_all(roots):
+    perm, sand, mcp = [], [], []
+    files = [("global", GLOBAL_CLI, CURSOR_DIR / "permissions.json", CURSOR_DIR / "sandbox.json",
+              CURSOR_DIR / "mcp.json", CURSOR_DIR / "hooks.json")]
+    for d in find_cursor_dirs(roots):
+        files.append((short_home(d.parent),) + tuple(d / n for n in PROJECT_FILES))
+    for scope, cli, perms, sandbox, mcpf, hooks in files:
+        perm += scan_cli(cli, scope) + scan_autorun(perms, scope)
+        sand += scan_sandbox(sandbox, scope)
+        mcp += scan_mcp(mcpf, scope) + scan_hooks(hooks, scope)
+    return [
+        Category("Agent permissions",
+                 "Allow, deny and auto-run rules for Cursor's agent (cli-config.json, cli.json, permissions.json)",
+                 perm),
+        Category("Sandbox settings",
+                 "What sandboxed agent commands may read, write and reach (sandbox.json)", sand),
+        Category("MCP servers and hooks",
+                 "Servers the agent can call and commands Cursor runs automatically", mcp),
+        Category("Project data folders",
+                 "Per-project agent data: MCP descriptors, terminals, transcripts (~/.cursor/projects)",
+                 scan_projects()),
+    ]
