@@ -14,10 +14,10 @@ homepage: https://github.com/atraxsrc/cursor-revoke
 license: MIT
 description: |
   Audit and revoke Cursor agent access on Linux.
-  An installer-style terminal UI in reverse: it shows every folder, "always
-  allow" rule, MCP server and hook Cursor's agent has been given, lets you
-  tick what to remove, and quarantines it instead of deleting so a run can
-  be undone.
+  An installer-style terminal UI in reverse: it shows the "always allow"
+  rules, auto-run rules, wide sandbox settings, MCP servers, hooks and
+  per-project data folders Cursor's agent has accumulated, lets you tick what
+  to remove, and quarantines or backs up first so a run can be undone.
 depends:
   - python3 (>= 3.8)
 recommends:

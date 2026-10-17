@@ -61,9 +61,6 @@ def copy_sources(dest, skip=()):
             continue
         (dest / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, dest / rel)
-    for doc in ("README.md", "CHANGELOG.md"):   # docs may not be written yet
-        if doc not in skip and not (dest / doc).exists():
-            (dest / doc).write_text("placeholder\n")
     return dest / "packaging" / "build.sh"
 
 
