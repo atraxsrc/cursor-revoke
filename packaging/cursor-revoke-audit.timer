@@ -1,0 +1,12 @@
+# Scheduled audit. Off until enabled: `cursor-revoke --schedule weekly` (or
+# daily / off), which also writes a drop-in overriding OnCalendar= below.
+[Unit]
+Description=Scheduled cursor-revoke audit of Cursor access
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

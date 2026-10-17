@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -1020,6 +1021,74 @@ def summarize(cats):
     return "; ".join(bits) or None
 
 
+# --------------------------------------------------------------------------- scheduled audit
+TIMER = "cursor-revoke-audit.timer"
+
+
+def notification_text(cats):
+    """Totals across categories ("Cursor: 2 stale, 1 risky."), or None when nothing needs a look."""
+    stale = sum(1 for c in cats for i in c.items if i.stale)
+    risky = sum(1 for c in cats for i in c.items if i.risky and not i.stale)
+    what = ([f"{stale} stale"] if stale else []) + ([f"{risky} risky"] if risky else [])
+    return f"Cursor: {', '.join(what)}." if what else None
+
+
+def config_dir():
+    return Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config")
+
+
+def state_dir():
+    return Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local" / "state") / "cursor-revoke"
+
+
+def send_notification(text):
+    """Desktop notification through notify-send. Returns False when it is not installed."""
+    if not shutil.which("notify-send"):
+        return False
+    subprocess.run(["notify-send", "--app-name=cursor-revoke", "--icon=cursor-revoke",
+                    "Cursor access needs a look", clean(text) + " Run cursor-revoke to review."],
+                   check=False)
+    return True
+
+
+def schedule(choice, dry_run=False):
+    """Turn the systemd user timer on (weekly or daily) or off. Returns an exit status."""
+    dropin = config_dir() / "systemd" / "user" / (TIMER + ".d") / "schedule.conf"
+    if dry_run:
+        if choice == "off":
+            print(f"Dry run: would run  systemctl --user disable --now {TIMER}")
+        else:
+            print(f"Dry run: would write {dropin} with OnCalendar={choice} "
+                  f"and run  systemctl --user enable --now {TIMER}")
+        return 0
+    if not shutil.which("systemctl"):
+        print("systemctl not found: scheduled audits need a systemd user session.", file=sys.stderr)
+        return 1
+
+    def ctl(*args):
+        return subprocess.run(["systemctl", "--user", *args]).returncode
+
+    if choice == "off":
+        code = ctl("disable", "--now", TIMER)
+        if code == 0:
+            print("Scheduled audit: off")
+        else:
+            print(f"Could not disable {TIMER}: it may never have been installed, or there is no "
+                  "systemd user session (is this a desktop login?).", file=sys.stderr)
+        return code
+    # A drop-in overrides the OnCalendar= shipped in the timer unit.
+    dropin.parent.mkdir(parents=True, exist_ok=True)
+    dropin.write_text(f"[Timer]\nOnCalendar=\nOnCalendar={choice}\n")
+    code = ctl("daemon-reload") or ctl("enable", "--now", TIMER)
+    if code == 0:
+        print(f"Scheduled audit: {choice}  (check with: systemctl --user status {TIMER})")
+    else:
+        dropin.unlink()
+        print(f"Could not enable {TIMER}: is there a systemd user session (desktop login)? "
+              "From a source checkout, run ./install.sh first.", file=sys.stderr)
+    return code
+
+
 # --------------------------------------------------------------------------- TUI
 def tick(items, pred, on):
     """Set selected=on for every unlocked item matching pred. Locked items are
@@ -1408,16 +1477,36 @@ def run(args, ap):
     except ValueError as e:
         ap.error(str(e))
 
-    if args.schedule or args.notify:
-        # Task 8 replaces this stub with the systemd timer and notify-send code.
-        print("--schedule and --notify are not available yet.", file=sys.stderr)
-        sys.exit(1)
+    if args.schedule:
+        if args.roots != [str(HOME)]:
+            print("Note: the scheduled run uses default options (whole home). "
+                  "To change that: systemctl --user edit cursor-revoke-audit.service", file=sys.stderr)
+        sys.exit(schedule(args.schedule, args.dry_run))
     if args.restore:
         warn_if_running()
         restore(args.restore)
         return
     print("Scanning Cursor footprint (this can take a minute on a big home folder)...", file=sys.stderr)
     cats = scan_all(args.roots)
+    if args.notify:
+        summary = notification_text(cats)
+        # One notification per change: the last summary is remembered, so a situation
+        # you have already been told about is only logged, not shown again.
+        memo = state_dir() / "last-notified"
+        previous = memo.read_text() if memo.is_file() else None
+        if summary is None:
+            print("cursor-revoke: nothing stale or risky found.")
+        elif summary == previous:
+            print("cursor-revoke: " + summary + "  (unchanged since the last notification)")
+        else:
+            print("cursor-revoke: " + clean(summarize(cats)))
+            if not send_notification(summary):
+                print("notify-send not found: install libnotify-bin (Debian/Ubuntu) or libnotify "
+                      "to get desktop notifications.", file=sys.stderr)
+        if (summary or "") != (previous or ""):
+            memo.parent.mkdir(parents=True, exist_ok=True)
+            memo.write_text(summary or "")
+        return
     if args.report:
         print_report(cats, args.only)
         return

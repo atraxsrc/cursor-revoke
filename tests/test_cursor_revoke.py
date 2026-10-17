@@ -921,5 +921,148 @@ class TestRestoreOutput(FakeHome):
         self.assertTrue((self.home / ".cursor/projects" / bad / "terminals/1.txt").exists())
 
 
+class TestNotifyFlag(FakeHome):
+    """--notify is what the systemd timer runs: scan, one summary line, desktop notification."""
+
+    def run_notify(self, with_notify_send=True):
+        bindir = self.home / "bin"
+        bindir.mkdir(exist_ok=True)
+        log = self.home / "notify.log"
+        if with_notify_send:
+            stub = bindir / "notify-send"
+            stub.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" >> "$NOTIFY_LOG"\n')
+            stub.chmod(0o755)
+        env = dict(os.environ, CURSOR_REVOKE_HOME=str(self.home), PYTHONDONTWRITEBYTECODE="1",
+                   PATH=str(bindir), NOTIFY_LOG=str(log),
+                   XDG_STATE_HOME=str(self.home / ".local/state"))
+        r = subprocess.run([sys.executable, str(SCRIPT), "--notify", "--roots", str(self.home / "nowhere")],
+                           env=env, capture_output=True, text=True, timeout=60)
+        return r, (log.read_text() if log.exists() else "")
+
+    def stale(self, *names):
+        for n in names:
+            d = self.home / ".cursor/projects" / n
+            (d / "mcps").mkdir(parents=True, exist_ok=True)
+            (d / "mcps" / "x.json").write_text("{}")
+
+    def test_notification_text_has_real_counts(self):
+        self.stale("1792207849851", "1792207849852")
+        self.write(".cursor/mcp.json", {"mcpServers": {"srv": {"command": "npx"}}})
+        r, sent = self.run_notify()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--app-name=cursor-revoke", sent)
+        self.assertIn("Cursor: 2 stale, 1 risky. Run cursor-revoke to review.", sent)
+
+    def test_notifies_once_per_change(self):
+        self.stale("1792207849851")
+        _, first = self.run_notify()
+        self.assertIn("1 stale", first)
+        r, second = self.run_notify()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(second, first)
+        self.assertIn("unchanged", r.stdout)
+        self.assertTrue((self.home / ".local/state/cursor-revoke/last-notified").is_file())
+        self.stale("1792207849852")
+        _, third = self.run_notify()
+        self.assertIn("2 stale", third)
+
+    def test_quiet_when_nothing_found(self):
+        r, sent = self.run_notify()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("nothing stale or risky", r.stdout)
+        self.assertEqual(sent, "")
+
+    def test_still_exits_zero_without_notify_send(self):
+        self.stale("1792207849851")
+        r, sent = self.run_notify(with_notify_send=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("libnotify", r.stderr)
+        self.assertEqual(sent, "")
+
+
+class TestScheduleFlag(FakeHome):
+    """--schedule weekly|daily|off drives the systemd user timer through systemctl."""
+
+    def run_schedule(self, choice, with_systemctl=True, fail=False, extra=(), config_home=None):
+        bindir = self.home / "bin"
+        bindir.mkdir(exist_ok=True)
+        log = self.home / "systemctl.log"
+        if with_systemctl:
+            stub = bindir / "systemctl"
+            stub.write_text('#!/bin/sh\necho "$*" >> "$SYSTEMCTL_LOG"\n[ -z "$SYSTEMCTL_FAIL" ] || exit 1\n')
+            stub.chmod(0o755)
+        env = dict(os.environ, CURSOR_REVOKE_HOME=str(self.home), PYTHONDONTWRITEBYTECODE="1",
+                   PATH=str(bindir), SYSTEMCTL_LOG=str(log), SYSTEMCTL_FAIL="1" if fail else "",
+                   XDG_CONFIG_HOME=str(config_home or self.home / ".config"))
+        r = subprocess.run([sys.executable, str(SCRIPT), *extra, "--schedule", choice], env=env,
+                           capture_output=True, text=True, timeout=60)
+        calls = log.read_text().splitlines() if log.exists() else []
+        return r, calls
+
+    def dropin(self, config_home=None):
+        return (config_home or self.home / ".config") / "systemd/user/cursor-revoke-audit.timer.d/schedule.conf"
+
+    def test_respects_xdg_config_home(self):
+        cfg = self.home / "cfg"
+        r, _ = self.run_schedule("daily", config_home=cfg)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(self.dropin(cfg).is_file())
+        self.assertFalse(self.dropin().exists())
+
+    def test_enable_failure_leaves_nothing_behind_and_explains(self):
+        r, calls = self.run_schedule("weekly", fail=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(self.dropin().exists())
+        self.assertIn("systemd user session", r.stderr)
+        self.assertEqual(calls, ["--user daemon-reload"])
+
+    def test_off_failure_explains(self):
+        r, _ = self.run_schedule("off", fail=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("systemd user session", r.stderr)
+
+    def test_dry_run_changes_nothing(self):
+        r, calls = self.run_schedule("daily", extra=("--dry-run",))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(self.dropin().exists())
+        self.assertEqual(calls, [])
+        self.assertIn("would", r.stdout)
+
+    def test_mentions_that_scan_options_are_not_carried_over(self):
+        r, _ = self.run_schedule("weekly", extra=("--roots", str(self.home / "x")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("default options", r.stderr)
+
+    def test_daily_writes_dropin_and_enables_timer(self):
+        r, calls = self.run_schedule("daily")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.dropin().read_text(), "[Timer]\nOnCalendar=\nOnCalendar=daily\n")
+        self.assertEqual(calls, ["--user daemon-reload", "--user enable --now cursor-revoke-audit.timer"])
+        self.assertIn("daily", r.stdout)
+
+    def test_weekly_overrides_an_earlier_choice(self):
+        self.run_schedule("daily")
+        r, _ = self.run_schedule("weekly")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("OnCalendar=weekly", self.dropin().read_text())
+
+    def test_off_disables_timer(self):
+        r, calls = self.run_schedule("off")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(calls, ["--user disable --now cursor-revoke-audit.timer"])
+        self.assertIn("off", r.stdout)
+
+    def test_rejects_other_values(self):
+        r, calls = self.run_schedule("hourly")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(calls, [])
+
+    def test_fails_clearly_without_systemctl(self):
+        r, calls = self.run_schedule("weekly", with_systemctl=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("systemctl", r.stderr)
+        self.assertFalse(self.dropin().exists())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,12 @@
+# Runs one scheduled audit: scan, one-line summary in the journal, desktop
+# notification if anything is stale or risky. Never changes anything.
+# Started by cursor-revoke-audit.timer; @BIN@ is filled in by the packaging scripts.
+[Unit]
+Description=cursor-revoke audit of Cursor access
+Documentation=https://github.com/atraxsrc/cursor-revoke
+
+[Service]
+Type=oneshot
+ExecStart=@BIN@ --notify
+Nice=19
+IOSchedulingClass=idle
