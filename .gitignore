@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.cursor-revoke.tmp
+.cursor-revoke-quarantine/
+dist/
+.superpowers/
+.claude/
+.mcp.json
