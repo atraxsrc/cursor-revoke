@@ -7,6 +7,7 @@ import io
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -690,6 +691,122 @@ class TestApply(FakeHome):
         qdir = self.latest_quarantine()
         for d in (cr.QUARANTINE_ROOT, qdir, qdir / "backup", qdir / "projects"):
             self.assertEqual(mode(d), 0o700, d)
+
+
+class CliBase(FakeHome):
+    def run_cli(self, *args):
+        env = dict(os.environ, CURSOR_REVOKE_HOME=str(self.home), PYTHONDONTWRITEBYTECODE="1")
+        return subprocess.run([sys.executable, str(SCRIPT), *args], input="\n", env=env,
+                              capture_output=True, text=True, timeout=60)
+
+    def snapshot(self):
+        return {str(p): p.stat().st_mtime_ns for p in self.home.rglob("*")}
+
+
+class TestReport(CliBase):
+    def setUp(self):
+        super().setUp()
+        self.write(".cursor/cli-config.json",
+                   {"permissions": {"allow": ["Shell(sudo)", "Read(src/**)"], "deny": []},
+                    "approvalMode": "yolo"})
+        self.write_text(".cursor/mcp.json", "{ // comment\n}")
+
+    def test_report_lists_categories_and_legend(self):
+        r = self.run_cli("--report", "--roots", str(self.home))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for name in ("Agent permissions", "Sandbox settings", "MCP servers and hooks",
+                     "Project data folders"):
+            self.assertIn(name, r.stdout)
+        self.assertIn("! risky   ~ stale   # locked (shown only)", r.stdout)
+        self.assertTrue(any(l.startswith(" # ") for l in r.stdout.splitlines()), r.stdout)
+        self.assertTrue(any(l.startswith(" ! ") for l in r.stdout.splitlines()), r.stdout)
+
+    def test_report_only_risky_hides_ok_items(self):
+        r = self.run_cli("--report", "--only", "risky", "--roots", str(self.home))
+        self.assertIn("Shell(sudo)", r.stdout)
+        self.assertNotIn("Read(src/**)", r.stdout)
+        self.assertNotIn("unknown format", r.stdout)
+
+    def test_version_prints_0_1_0(self):
+        r = self.run_cli("--version")
+        self.assertEqual(r.stdout.strip(), "cursor-revoke 0.1.0")
+
+    def test_report_never_writes(self):
+        before = self.snapshot()
+        r = self.run_cli("--report", "--roots", str(self.home))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse((self.home / ".cursor-revoke-quarantine").exists())
+
+    def test_report_does_not_touch_sqlite(self):
+        db = self.home / ".config/Cursor/User/globalStorage/state.vscdb"
+        db.parent.mkdir(parents=True)
+        db.write_bytes(b"x")
+        os.chmod(db, 0o000)
+        try:
+            r = self.run_cli("--report", "--roots", str(self.home))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+        finally:
+            os.chmod(db, 0o600)
+
+    def test_pause_waits_for_enter(self):
+        r = self.run_cli("--report", "--pause", "--roots", str(self.home))
+        self.assertIn("Press Enter", r.stdout)
+
+    def test_restore_missing_manifest_errors(self):
+        r = self.run_cli("--restore", str(self.home / "nope"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("No manifest.json", r.stderr)
+
+
+class TestSummarize(unittest.TestCase):
+    def test_none_when_ok(self):
+        self.assertIsNone(cr.summarize([cr.Category("A", "", [cr.Item("allow", "k", "t")])]))
+
+    def test_counts_skip_locked_and_stale_first(self):
+        cats = [cr.Category("A", "", [cr.Item("allow", "k", "t", stale=True, risky=True),
+                                      cr.Item("allow", "k2", "t", risky=True),
+                                      cr.Item("unknown", "k3", "t", locked=True)])]
+        self.assertEqual(cr.summarize(cats), "A: 1 stale, 1 risky")
+
+
+class TestRunningCursor(unittest.TestCase):
+    def fake_proc(self, procs):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for pid, (comm, cmd) in procs.items():
+            d = root / str(pid)
+            d.mkdir()
+            if comm is not None:
+                (d / "comm").write_text(comm + "\n")
+            if cmd is not None:
+                (d / "cmdline").write_bytes(cmd.replace(" ", "\0").encode())
+        (root / "self").mkdir()
+        return root
+
+    def test_detects_cursor_processes(self):
+        root = self.fake_proc({
+            101: ("cursor", "/usr/share/cursor/cursor --no-sandbox"),
+            102: ("bash", "bash"),
+            103: ("Cursor-0.50.AppIm", "/opt/Cursor-0.50.AppImage"),
+            104: ("vim", "vim cursor.txt"),
+            105: (None, None),
+        })
+        with mock.patch.object(cr, "PROC", root):
+            self.assertEqual(sorted(cr.running_cursor()), [101, 103])
+
+    def test_missing_proc_is_empty(self):
+        with mock.patch.object(cr, "PROC", Path("/nonexistent-proc")):
+            self.assertEqual(cr.running_cursor(), [])
+
+    def test_warning_text(self):
+        with mock.patch.object(cr, "running_cursor", return_value=[7]):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                cr.warn_if_running()
+        self.assertIn("Cursor is running", buf.getvalue())
 
 
 if __name__ == "__main__":

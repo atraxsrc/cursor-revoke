@@ -10,12 +10,14 @@ remove, and QUARANTINES it instead of deleting, so every run can be undone.
 Needs only the Python 3 standard library. Close Cursor before applying
 changes (it rewrites its config files while running).
 """
+import argparse
 import json
 import os
 import re
 import shutil
 import sys
 import time
+import traceback
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -927,3 +929,157 @@ def restore(qdir):
             print(f"SKIP {file}: unreadable, not touched; the old copy is {backups[file]}")
         else:
             print(f"SKIP {file}: missing or unreadable and no backup in {qdir}")
+
+
+# --------------------------------------------------------------------------- running Cursor
+PROC = Path("/proc")
+
+
+def running_cursor():
+    """PIDs of running Cursor processes, from /proc only. Never raises."""
+    pids = []
+    try:
+        entries = list(PROC.iterdir())
+    except OSError:
+        return pids
+    me = os.getpid()
+    for p in entries:
+        if not p.name.isdigit() or int(p.name) == me:
+            continue
+        try:
+            comm = (p / "comm").read_text(errors="ignore").strip()
+        except (OSError, ValueError):
+            comm = ""
+        try:
+            argv0 = (p / "cmdline").read_bytes().split(b"\0")[0].decode(errors="ignore")
+        except (OSError, ValueError):
+            argv0 = ""
+        base = argv0.rsplit("/", 1)[-1]
+        if (comm == "cursor" or argv0.endswith(("/cursor", "/Cursor"))
+                or (base.endswith(".AppImage") and "cursor" in base.lower())):
+            pids.append(int(p.name))
+    return pids
+
+
+def warn_if_running():
+    """Warn on stderr, never block. Cursor rewrites its config files while it runs."""
+    pids = running_cursor()
+    if pids:
+        print(f"Warning: Cursor is running (pid {', '.join(map(str, pids[:5]))}). It rewrites its "
+              "config files while open, so close it before applying changes.", file=sys.stderr)
+    return pids
+
+
+# --------------------------------------------------------------------------- report
+def show_in(it, mode):
+    return (mode == "all" or (mode == "stale" and it.stale) or (mode == "risky" and it.risky)
+            or (mode == "selected" and it.selected))
+
+
+def print_report(cats, only="all"):
+    for c in cats:
+        risky = sum(i.risky for i in c.items)
+        stale = sum(i.stale for i in c.items)
+        print(f"\n== {c.name}: {len(c.items)} found, {stale} stale, {risky} risky ==")
+        for it in c.items:
+            if not show_in(it, only):
+                continue
+            flag = "#" if it.locked else ("!" if it.risky else ("~" if it.stale else " "))
+            print(f" {flag} {it.title}   {it.badge}")
+            for d in it.detail[1:]:
+                if it.risky or it.stale or it.locked:
+                    print(f"      {d}")
+    print("\nLegend: ! risky   ~ stale   # locked (shown only).  Run without --report to revoke.")
+
+
+def summarize(cats):
+    """One line naming what needs attention per category, or None when nothing does."""
+    bits = []
+    for c in cats:
+        stale = sum(1 for i in c.items if i.stale)
+        risky = sum(1 for i in c.items if i.risky and not i.stale)
+        what = []
+        if stale:
+            what.append(f"{stale} stale")
+        if risky:
+            what.append(f"{risky} risky")
+        if what:
+            bits.append(f"{c.name}: {', '.join(what)}")
+    return "; ".join(bits) or None
+
+
+# --------------------------------------------------------------------------- command line
+def main():
+    ap = argparse.ArgumentParser(description="Audit and revoke Cursor access (installer-style TUI).")
+    ap.add_argument("--report", action="store_true", help="print the audit and exit")
+    ap.add_argument("--only", choices=["all", "stale", "risky"], default="all",
+                    help="with --report: list only stale or risky items")
+    ap.add_argument("--dry-run", action="store_true", help="never change anything")
+    ap.add_argument("--restore", metavar="DIR", help="undo a run from its quarantine folder")
+    ap.add_argument("--roots", nargs="+", default=[str(HOME)],
+                    help="where to look for project .cursor/ folders (default: your home)")
+    ap.add_argument("--accent", default=os.environ.get("CURSOR_REVOKE_ACCENT", "blue"),
+                    help="bar color from your terminal theme palette: 0-15 or a name like blue, bright-magenta")
+    ap.add_argument("--pause", action="store_true",
+                    help="wait for Enter before exiting (keeps a launcher-opened terminal window open)")
+    ap.add_argument("--notify", action="store_true",
+                    help="scan, print a one-line summary and send a desktop notification if anything "
+                         "is stale or risky")
+    ap.add_argument("--schedule", choices=["weekly", "daily", "off"],
+                    help="turn the scheduled audit (a systemd user timer) on at that interval, or off")
+    ap.add_argument("--version", action="version", version=f"cursor-revoke {__version__}")
+    args = ap.parse_args()
+    if not args.pause:
+        run(args, ap)
+        return
+    # Launched from a desktop entry: hold the window until Enter, even after an error.
+    code = 0
+    try:
+        run(args, ap)
+    except SystemExit as e:
+        code = e.code
+        if isinstance(code, str):
+            print(code, file=sys.stderr)
+            code = 1
+    except KeyboardInterrupt:
+        code = 130
+    except Exception:
+        traceback.print_exc()
+        code = 1
+    try:
+        input("\nPress Enter to close this window... ")
+    except (EOFError, OSError):
+        pass
+    sys.exit(code)
+
+
+def run(args, ap):
+    global ACCENT
+    try:
+        ACCENT = parse_accent(args.accent)
+    except ValueError as e:
+        ap.error(str(e))
+
+    if args.schedule or args.notify:
+        # Task 8 replaces this stub with the systemd timer and notify-send code.
+        print("--schedule and --notify are not available yet.", file=sys.stderr)
+        sys.exit(1)
+    if args.restore:
+        warn_if_running()
+        restore(args.restore)
+        return
+    print("Scanning Cursor footprint (this can take a minute on a big home folder)...", file=sys.stderr)
+    cats = scan_all(args.roots)
+    if args.report:
+        print_report(cats, args.only)
+        return
+    if not sys.stdin.isatty():
+        sys.exit("Interactive mode needs a terminal. Use --report for plain output.")
+    warn_if_running()
+    # TASK 7: start the curses App here (App(scr, cats, args.dry_run) under curses.wrapper),
+    # and call warn_if_running() again before apply.
+    sys.exit("The interactive screen is not available yet. Use --report for plain output.")
+
+
+if __name__ == "__main__":
+    main()
