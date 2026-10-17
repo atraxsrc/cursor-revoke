@@ -809,5 +809,45 @@ class TestRunningCursor(unittest.TestCase):
         self.assertIn("Cursor is running", buf.getvalue())
 
 
+class TestTui(unittest.TestCase):
+    def test_bulk_tick_skips_locked(self):
+        items = [cr.Item("allow", "a", "a"), cr.Item("block", "b", "b", locked=True),
+                 cr.Item("allow", "c", "c", stale=True), cr.Item("unknown", "d", "d", locked=True)]
+        self.assertEqual(cr.tick(items, lambda it: True, True), 2)
+        self.assertEqual([i.selected for i in items], [True, False, True, False])
+        self.assertEqual(cr.tick(items, lambda it: True, True), 0)
+        self.assertEqual(cr.chosen(items), [items[0], items[2]])
+        self.assertEqual(cr.tick(items, lambda it: it.stale, False), 1)
+        self.assertEqual(cr.chosen(items), [items[0]])
+
+    def test_chosen_ignores_a_locked_item_marked_selected(self):
+        items = [cr.Item("block", "b", "b", locked=True, selected=True)]
+        self.assertEqual(cr.chosen(items), [])
+
+
+class TestClean(unittest.TestCase):
+    def test_control_characters_become_question_marks(self):
+        self.assertEqual(cr.clean("a\x1b[2Kb"), "a?[2Kb")
+        self.assertEqual(cr.clean("a\rb"), "a?b")
+        self.assertEqual(cr.clean("a\x07b"), "a?b")
+        self.assertEqual(cr.clean("a\tb"), "a b")
+        self.assertEqual(cr.clean("caf\u00e9 \u65e5\u672c ~/x-y"), "caf\u00e9 \u65e5\u672c ~/x-y")
+
+
+class TestReportControlChars(CliBase):
+    def test_report_strips_escape_and_carriage_return(self):
+        self.write(".cursor/mcp.json",
+                   {"mcpServers": {"evil\x1b[2Kx": {"command": "node\rfake", "args": ["a\x07"]}}})
+        r = subprocess.run([sys.executable, str(SCRIPT), "--report", "--roots", str(self.home)],
+                           env=dict(os.environ, CURSOR_REVOKE_HOME=str(self.home),
+                                    PYTHONDONTWRITEBYTECODE="1"),
+                           capture_output=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"evil?[2Kx", r.stdout)
+        self.assertIn(b"node?fake", r.stdout)
+        for bad in (b"\x1b", b"\r", b"\x07"):
+            self.assertNotIn(bad, r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

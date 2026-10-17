@@ -11,6 +11,7 @@ Needs only the Python 3 standard library. Close Cursor before applying
 changes (it rewrites its config files while running).
 """
 import argparse
+import curses
 import json
 import os
 import re
@@ -18,6 +19,7 @@ import shutil
 import sys
 import time
 import traceback
+import unicodedata
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,6 +95,16 @@ class Category:
 
 
 # --------------------------------------------------------------------------- helpers
+def clean(s):
+    """Text safe to print: every control/format character (Unicode category C*,
+    e.g. ESC, CR, BEL) becomes "?", tabs become a space. Config files from cloned
+    repos are attacker-controlled and must not be able to move the cursor or
+    rewrite lines on the user's terminal."""
+    s = str(s)
+    return "".join(" " if ch == "\t" else ("?" if unicodedata.category(ch)[0] == "C" else ch)
+                   for ch in s)
+
+
 def load_json(p):
     try:
         with open(p, "r", encoding="utf-8") as fh:
@@ -985,10 +997,10 @@ def print_report(cats, only="all"):
             if not show_in(it, only):
                 continue
             flag = "#" if it.locked else ("!" if it.risky else ("~" if it.stale else " "))
-            print(f" {flag} {it.title}   {it.badge}")
+            print(f" {flag} {clean(it.title)}   {clean(it.badge)}")
             for d in it.detail[1:]:
                 if it.risky or it.stale or it.locked:
-                    print(f"      {d}")
+                    print(f"      {clean(d)}")
     print("\nLegend: ! risky   ~ stale   # locked (shown only).  Run without --report to revoke.")
 
 
@@ -1006,6 +1018,342 @@ def summarize(cats):
         if what:
             bits.append(f"{c.name}: {', '.join(what)}")
     return "; ".join(bits) or None
+
+
+# --------------------------------------------------------------------------- TUI
+def tick(items, pred, on):
+    """Set selected=on for every unlocked item matching pred. Locked items are
+    shown only and never ticked. Returns how many items changed."""
+    n = 0
+    for it in items:
+        if not it.locked and pred(it) and it.selected != on:
+            it.selected = on
+            n += 1
+    return n
+
+
+def chosen(items):
+    """What review and apply act on: ticked items that are not locked."""
+    return [it for it in items if it.selected and not it.locked]
+
+
+class App:
+    def __init__(self, scr, cats, dry_run):
+        self.scr, self.cats, self.dry_run = scr, cats, dry_run
+        self.final = []
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass
+        self.colors = curses.has_colors() and not os.environ.get("NO_COLOR")
+        if self.colors:
+            curses.start_color()
+            try:
+                curses.use_default_colors()
+                bg = -1
+            except curses.error:
+                bg = curses.COLOR_BLACK
+            curses.init_pair(1, curses.COLOR_RED, bg)
+            curses.init_pair(2, curses.COLOR_YELLOW, bg)
+            curses.init_pair(3, curses.COLOR_GREEN, bg)
+            curses.init_pair(4, curses.COLOR_CYAN, bg)
+            acc = ACCENT % max(8, getattr(curses, "COLORS", 8))
+            curses.init_pair(5, curses.COLOR_BLACK, acc)   # bars: theme black on theme accent
+            curses.init_pair(7, acc, bg)                   # accent text on theme background
+        scr.keypad(True)
+
+    def bar(self):
+        # Header/footer/cursor bar. Uses the theme palette instead of reverse
+        # video, which would paint the theme's foreground (often cream/white).
+        return curses.color_pair(5) if self.colors else curses.A_REVERSE
+
+    def hl(self, attr):
+        # Cursor highlight: colored rows reverse into their own palette color,
+        # plain rows get the accent bar.
+        return attr | curses.A_REVERSE if attr else self.bar()
+
+    def cp(self, n):
+        return curses.color_pair(n) if self.colors else (curses.A_BOLD if n in (1, 7) else 0)
+
+    def put(self, y, x, s, attr=0):
+        h, w = self.scr.getmaxyx()
+        if y < 0 or y >= h or x >= w - 1:
+            return
+        try:
+            # Everything drawn passes through clean(): item text comes from
+            # config files that a cloned repo controls.
+            self.scr.addstr(y, x, clean(s)[: w - x - 1], attr)
+        except curses.error:
+            pass
+
+    def header(self, title, sub=""):
+        h, w = self.scr.getmaxyx()
+        self.put(0, 0, " " * (w - 1), self.bar())
+        self.put(0, 1, "cursor-revoke" + ("  [DRY RUN]" if self.dry_run else "") + "  |  " + title,
+                 self.bar())
+        if sub:
+            self.put(1, 1, sub, self.cp(4))
+
+    def footer(self, text):
+        h, w = self.scr.getmaxyx()
+        self.put(h - 1, 0, (" " + text).ljust(w - 1), self.bar())
+
+    def prompt(self, msg):
+        h, w = self.scr.getmaxyx()
+        self.put(h - 1, 0, " " * (w - 1))
+        self.put(h - 1, 0, msg, self.cp(7))
+        curses.echo()
+        try:
+            curses.curs_set(1)
+        except curses.error:
+            pass
+        try:
+            s = self.scr.getstr(h - 1, min(len(msg), w - 2), 200).decode(errors="ignore")
+        finally:
+            curses.noecho()
+            try:
+                curses.curs_set(0)
+            except curses.error:
+                pass
+        return s.strip()
+
+    def item_attr(self, it):
+        if it.locked:
+            return curses.A_DIM
+        if it.risky:
+            return self.cp(1)
+        if it.stale:
+            return self.cp(2)
+        return 0
+
+    # ---- screens
+    def run(self):
+        cur = 0
+        while True:
+            entries = [c.name for c in self.cats] + ["Review & apply", "Quit"]
+            self.scr.erase()
+            self.header("Main menu", "Pick a category, tick what to revoke, then Review & apply.")
+            for i, c in enumerate(self.cats):
+                sel = len(chosen(c.items))
+                risky = sum(it.risky for it in c.items)
+                stale = sum(it.stale for it in c.items)
+                line = f"{c.name:<24}{len(c.items):>5} found  {stale:>4} stale  {risky:>4} risky   [{sel} selected]"
+                attr = self.bar() if i == cur else 0
+                self.put(3 + i, 2, ("> " if i == cur else "  ") + line, attr)
+                if i == cur:
+                    self.put(4 + len(entries), 4, c.help, self.cp(4))
+            for j, name in enumerate(entries[len(self.cats):], start=len(self.cats)):
+                attr = self.bar() if j == cur else self.cp(7)
+                self.put(4 + j, 2, ("> " if j == cur else "  ") + name, attr)
+            total = sum(len(chosen(c.items)) for c in self.cats)
+            self.put(7 + len(entries), 4, f"{total} item(s) selected in total.", self.cp(3))
+            self.put(8 + len(entries), 4, "Red = risky (broad rules, MCP servers, hooks)   "
+                     "Yellow = stale (folder gone)   # = locked (shown only)")
+            self.footer("Up/Down: move   Enter: open   q: quit")
+            k = self.scr.getch()
+            if k in (curses.KEY_UP, ord("k")):
+                cur = (cur - 1) % len(entries)
+            elif k in (curses.KEY_DOWN, ord("j")):
+                cur = (cur + 1) % len(entries)
+            elif k in (ord("q"), 27):
+                return
+            elif k in (10, 13, curses.KEY_ENTER, curses.KEY_RIGHT, ord("l")):
+                if cur < len(self.cats):
+                    self.checklist(self.cats[cur])
+                elif entries[cur] == "Quit":
+                    return
+                elif self.review() == "exit":
+                    return
+
+    def build_rows(self, cat, filt, mode):
+        groups = [
+            ("STALE", "folder gone - safe to remove", self.cp(2), lambda it: it.stale),
+            ("RISKY", "broad rules, MCP servers, hooks - review", self.cp(1),
+             lambda it: it.risky and not it.stale),
+            ("OK", "no problems found", self.cp(3), lambda it: not it.stale and not it.risky),
+        ]
+        rows = []
+        f = filt.lower()
+        for name, desc, color, test in groups:
+            members = [it for it in cat.items if test(it) and show_in(it, mode)
+                       and (f in it.name.lower() or f in it.where.lower() or f in it.title.lower())]
+            if members:
+                rows.append(("head", name, desc, color, members))
+                rows += [("item", it) for it in members]
+        return rows
+
+    def checklist(self, cat):
+        cur, top, filt = 0, 0, ""
+        modes = ["all", "stale", "risky", "selected"]
+        mode = "all"
+        detail_h = 7
+        while True:
+            rows = self.build_rows(cat, filt, mode)
+            h, w = self.scr.getmaxyx()
+            list_h = max(1, h - 4 - detail_h)
+            cur = max(0, min(cur, len(rows) - 1))
+            if cur < top:
+                top = cur
+            elif cur >= top + list_h:
+                top = cur - list_h + 1
+            self.scr.erase()
+            self.header(cat.name, "Space: tick item or whole group   a all  n none  s stale  r risky   "
+                        f"v view: {mode.upper()}   / search   Esc back")
+            if not rows:
+                self.put(3, 2, f"Nothing to show (view: {mode}" + (f", search: {filt}" if filt else "") + ").")
+            name_w = 30
+            for i in range(list_h):
+                j = top + i
+                if j >= len(rows):
+                    break
+                row = rows[j]
+                if row[0] == "head":
+                    _, gname, desc, color, members = row
+                    open_ = [it for it in members if not it.locked]
+                    n_sel = len(chosen(open_))
+                    if not open_:
+                        mark = "[#]"
+                    else:
+                        mark = "[x]" if n_sel == len(open_) else ("[-]" if n_sel else "[ ]")
+                    line = f"{mark} {gname} - {desc} ({n_sel}/{len(open_)} selected)"
+                    attr = color | curses.A_BOLD
+                else:
+                    it = row[1]
+                    mark = "[#]" if it.locked else ("[x]" if it.selected else "[ ]")
+                    badge = ("RISKY  " if it.stale and it.risky else "") + it.badge
+                    nw = name_w if it.where else max(name_w, w - 12 - len(badge))
+                    nm = it.name if len(it.name) <= nw else it.name[: nw - 1] + "~"
+                    room = w - 10 - nw - len(badge) - 2
+                    where = it.where if len(it.where) <= room else "..." + it.where[-max(0, room - 3):]
+                    line = f"    {mark} {nm.ljust(nw)} {where.ljust(max(0, room))} {badge}"
+                    attr = self.item_attr(it)
+                if j == cur:
+                    attr = self.hl(attr)
+                self.put(2 + i, 1, line, attr)
+            y0 = h - 1 - detail_h
+            self.put(y0, 0, "-" * (w - 1), self.cp(4))
+            if rows:
+                row = rows[cur]
+                if row[0] == "head":
+                    info = [f"Group {row[1]}: {row[2]}",
+                            f"{len(row[4])} item(s). Space ticks/unticks the whole group (locked items stay as they are)."]
+                else:
+                    info = list(row[1].detail)
+                    if row[1].locked:
+                        info = ["Locked: shown only, cursor-revoke never changes this."] + info
+                for k, d in enumerate(info[: detail_h - 1]):
+                    self.put(y0 + 1 + k, 2, d.replace(str(HOME), "~"))
+            sel = len(chosen(cat.items))
+            self.footer(f"{sel}/{sum(not it.locked for it in cat.items)} selected"
+                        + (f"   search: {filt}" if filt else "")
+                        + "   Up/Down move   Enter/Esc: back to menu")
+            visible = [r[1] for r in rows if r[0] == "item"]
+            k = self.scr.getch()
+            if k in (curses.KEY_UP, ord("k")):
+                cur -= 1
+            elif k in (curses.KEY_DOWN, ord("j")):
+                cur += 1
+            elif k == curses.KEY_PPAGE:
+                cur -= list_h
+            elif k == curses.KEY_NPAGE:
+                cur += list_h
+            elif k == curses.KEY_HOME:
+                cur = 0
+            elif k == curses.KEY_END:
+                cur = len(rows) - 1
+            elif k == ord(" ") and rows:
+                row = rows[cur]
+                if row[0] == "head":
+                    members = row[4]
+                    new = not all(it.selected for it in members if not it.locked)
+                    tick(members, lambda it: True, new)
+                else:
+                    it = row[1]
+                    tick([it], lambda it: True, not it.selected)
+                    cur += 1
+            elif k == ord("a"):
+                tick(visible, lambda it: True, True)
+            elif k == ord("n"):
+                tick(visible, lambda it: True, False)
+            elif k == ord("s"):
+                tick(visible, lambda it: it.stale, True)
+            elif k == ord("r"):
+                tick(visible, lambda it: it.risky, True)
+            elif k == ord("v"):
+                mode = modes[(modes.index(mode) + 1) % len(modes)]
+                cur = top = 0
+            elif k == ord("/"):
+                filt = self.prompt("Search name or location (empty = clear): ")
+                cur = top = 0
+            elif k in (27, ord("q"), 10, 13, curses.KEY_ENTER, curses.KEY_LEFT, ord("h")):
+                return
+
+    def pager(self, title, lines, footer):
+        top = 0
+        while True:
+            h, w = self.scr.getmaxyx()
+            body = h - 3
+            self.scr.erase()
+            self.header(title)
+            for i in range(body):
+                j = top + i
+                if j >= len(lines):
+                    break
+                text, attr = lines[j] if isinstance(lines[j], tuple) else (lines[j], 0)
+                self.put(2 + i, 1, text, attr)
+            self.footer(footer)
+            k = self.scr.getch()
+            if k in (curses.KEY_UP, ord("k")):
+                top = max(0, top - 1)
+            elif k in (curses.KEY_DOWN, ord("j")):
+                top = min(max(0, len(lines) - body), top + 1)
+            elif k == curses.KEY_PPAGE:
+                top = max(0, top - body)
+            elif k == curses.KEY_NPAGE:
+                top = min(max(0, len(lines) - body), top + body)
+            elif 0 <= k < 256:
+                return chr(k)
+
+    def running_warning(self):
+        pids = running_cursor()
+        if not pids:
+            return []
+        return [(f"WARNING: Cursor seems to be running (pid {', '.join(map(str, pids[:5]))}).", self.cp(1)),
+                ("Close it first, or it may overwrite its config files after this tool edits them.",
+                 self.cp(1)), ""]
+
+    def review(self):
+        plan = [it for c in self.cats for it in chosen(c.items)]
+        if not plan:
+            self.pager("Review", ["Nothing selected yet. Open a category and tick items with Space."],
+                       "any key: back")
+            return None
+        lines = self.running_warning()
+        for c in self.cats:
+            sel = chosen(c.items)
+            if sel:
+                lines.append((f"{c.name} ({len(sel)})", self.cp(4)))
+                lines += [("  - " + describe(it), self.item_attr(it)) for it in sel]
+                lines.append("")
+        lines += ["Project data folders are MOVED to a quarantine folder and JSON files are backed",
+                  "up first, so you can undo with --restore. Nothing is permanently deleted."]
+        k = self.pager(f"Review: {len(plan)} change(s)", lines,
+                       "y: apply   any other key: back" + ("   (dry run: nothing will change)" if self.dry_run else ""))
+        if k != "y":
+            return None
+        # Check again right before applying: Cursor may have been started meanwhile.
+        pids = running_cursor()
+        warn = f"Cursor is running (pid {', '.join(map(str, pids[:5]))}) - close it first! " if pids else ""
+        if self.prompt(warn + "Type YES to apply these changes: ") != "YES":
+            return None
+        if self.dry_run:
+            self.final = (["DRY RUN: nothing was changed. Without --dry-run this would:"]
+                          + ["  - " + describe(it) for it in plan])
+            self.pager("Dry run", self.final, "any key: exit")
+            return "exit"
+        self.final = apply_plan(plan)
+        self.pager("Done", self.final, "any key: exit")
+        return "exit"
 
 
 # --------------------------------------------------------------------------- command line
@@ -1076,9 +1424,18 @@ def run(args, ap):
     if not sys.stdin.isatty():
         sys.exit("Interactive mode needs a terminal. Use --report for plain output.")
     warn_if_running()
-    # TASK 7: start the curses App here (App(scr, cats, args.dry_run) under curses.wrapper),
-    # and call warn_if_running() again before apply.
-    sys.exit("The interactive screen is not available yet. Use --report for plain output.")
+    os.environ.setdefault("ESCDELAY", "25")
+    app_holder = {}
+
+    def _run(scr):
+        app = App(scr, cats, args.dry_run)
+        app_holder["app"] = app
+        app.run()
+
+    curses.wrapper(_run)
+    final = app_holder["app"].final if app_holder.get("app") else []
+    if final:
+        print("\n".join(clean(line) for line in final))
 
 
 if __name__ == "__main__":
