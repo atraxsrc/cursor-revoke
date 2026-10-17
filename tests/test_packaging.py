@@ -230,5 +230,20 @@ class TestBuildOutputFolder(unittest.TestCase):
         self.assertTrue((self.tree / "out" / "SHA256SUMS").is_file())
 
 
+class TestCiFlags(unittest.TestCase):
+    def test_every_flag_ci_passes_to_cursor_revoke_exists(self):
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        help_text = subprocess.run([sys.executable, str(ROOT / "cursor_revoke.py"), "--help"],
+                                   capture_output=True, text=True, timeout=60).stdout
+        flags = set()
+        for line in ci.splitlines():
+            m = re.search(r"\bcursor-revoke\s+(--?[\w-].*)$", line)
+            if m:
+                flags.update(re.findall(r"(?<!\S)(--[\w-]+)", m.group(1)))
+        self.assertTrue(flags)
+        for flag in flags:
+            self.assertIn(flag, help_text)
+
+
 if __name__ == "__main__":
     unittest.main()
