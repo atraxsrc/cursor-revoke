@@ -1242,6 +1242,23 @@ class TestRestoreRobust(FakeHome):
         self.assertNotIn("\x1b", out)
         self.assertEqual(cr.load_json(p), {"mcpServers": {"srv": {}}})
 
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores permissions")
+    def test_unwritable_file_does_not_stop_the_rest(self):
+        first = self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        second = self.write("code/app/.cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        items = [i for c in cr.scan_all([self.home]) for i in c.items if i.kind == "mcp"]
+        self.assertEqual(len(items), 2)
+        cr.apply_plan(items)
+        locked = first.parent
+        os.chmod(locked, 0o555)
+        try:
+            out = self.restore_latest()
+        finally:
+            os.chmod(locked, 0o755)
+        self.assertIn(f"FAIL {first}", out)
+        self.assertEqual(cr.load_json(second), {"mcpServers": {"srv": {}}})
+        self.assertIn(f"OK   put 1 entry back into {second}", out)
+
 
 class TestRestoreDryRun(CliBase):
     def test_restore_dry_run_changes_nothing(self):

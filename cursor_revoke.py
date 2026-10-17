@@ -1020,7 +1020,11 @@ def restore(qdir, dry_run=False):
                 if file_kind(file) == "special":   # swapped for a link since it was read
                     print(clean(f"SKIP {file}: symlink or not a regular file"))
                     continue
-                write_json_atomic(Path(file), data)
+                try:
+                    write_json_atomic(Path(file), data)
+                except OSError as e:
+                    print(clean(f"FAIL {file}: {e}"))
+                    continue
             print(clean(f"OK   put {entries} back into {file}"))
         elif file in backups and not os.path.lexists(file):
             # Nothing at all at the path (not even a dangling symlink): write
@@ -1032,8 +1036,12 @@ def restore(qdir, dry_run=False):
             if dry_run:
                 print(clean(f"DRY  would restore {file} from backup"))
                 continue
-            Path(file).parent.mkdir(parents=True, exist_ok=True)
-            write_json_atomic(Path(file), old)
+            try:
+                Path(file).parent.mkdir(parents=True, exist_ok=True)
+                write_json_atomic(Path(file), old)
+            except OSError as e:
+                print(clean(f"FAIL {file}: {e}"))
+                continue
             print(clean(f"OK   restored {file} from backup"))
         elif file in backups:
             print(clean(f"SKIP {file}: unreadable, not touched; the old copy is {backups[file]}"))
