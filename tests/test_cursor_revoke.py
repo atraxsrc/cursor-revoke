@@ -10,6 +10,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -602,6 +603,83 @@ class TestApply(FakeHome):
         self.assertTrue(any("Shell(*)" in d for d in by), by)
         self.assertTrue(any("srv" in d for d in by), by)
         self.assertTrue(any("workspace_readwrite" in d for d in by), by)
+
+
+    def test_two_removals_from_one_list_come_back_in_order(self):
+        orig = {"additionalReadwritePaths": ["~", "/", "build"]}
+        p = self.write("code/app/.cursor/sandbox.json", orig)
+        plan = [i for i in self.items() if i.kind == "sandbox"]
+        self.assertEqual([i.value for i in plan], ["~", "/"])
+        cr.apply_plan(plan)
+        self.assertEqual(cr.load_json(p), {"additionalReadwritePaths": ["build"]})
+        self.restore_latest()
+        self.assertEqual(cr.load_json(p), orig)
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores permissions")
+    def test_failed_write_is_logged_and_the_rest_is_restorable(self):
+        a = self.write("code/a/.cursor/cli.json", {"permissions": {"allow": ["Shell(*)"]}})
+        b = self.write("code/b/.cursor/cli.json", {"permissions": {"allow": ["Shell(*)"]}})
+        plan = [i for i in self.items() if i.kind == "allow"]
+        self.assertEqual(len(plan), 2)
+        os.chmod(b.parent, 0o555)
+        try:
+            log = cr.apply_plan(plan)
+        finally:
+            os.chmod(b.parent, 0o755)
+        self.assertTrue(any(line.startswith(f"FAIL {b}") for line in log), log)
+        self.assertEqual(cr.load_json(a), {"permissions": {"allow": []}})
+        self.assertEqual(cr.load_json(b), {"permissions": {"allow": ["Shell(*)"]}})
+        self.assertEqual({e["file"] for e in self.manifest()["edits"]}, {str(a)})
+        self.restore_latest()
+        self.assertEqual(cr.load_json(a), {"permissions": {"allow": ["Shell(*)"]}})
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores permissions")
+    def test_failed_move_is_logged_and_manifest_written(self):
+        ok = cr.PROJECTS_DIR / "12345"
+        bad = cr.PROJECTS_DIR / "67890"
+        for d in (ok, bad):
+            (d / "x").mkdir(parents=True)
+        plan = [i for i in self.items() if i.kind == "projdir"]
+        with mock.patch.object(cr.shutil, "move", side_effect=[None, OSError("no")]):
+            log = cr.apply_plan(plan)
+        self.assertTrue(any(line.startswith("FAIL") for line in log), log)
+        self.assertEqual(len(self.manifest()["moves"]), 1)
+
+    def test_backups_of_lookalike_paths_do_not_collide(self):
+        a = self.write("code/my-app/.cursor/cli.json", {"permissions": {"allow": ["Shell(*)"]}, "n": "a"})
+        b = self.write("code/my/app/.cursor/cli.json", {"permissions": {"allow": ["Shell(*)"]}, "n": "b"})
+        self.assertEqual(cr.encode_path(a), cr.encode_path(b))
+        cr.apply_plan([i for i in self.items() if i.kind == "allow"])
+        copies = [b_["copy"] for b_ in self.manifest()["backups"]]
+        self.assertEqual(len(set(copies)), 2)
+        a.unlink()
+        b.unlink()
+        self.restore_latest()
+        self.assertEqual(cr.load_json(a)["n"], "a")
+        self.assertEqual(cr.load_json(b)["n"], "b")
+
+    def test_two_runs_in_the_same_second_get_their_own_folders(self):
+        self.write(".cursor/mcp.json", {"mcpServers": {"a": {}, "b": {}}})
+        items = [i for i in self.items() if i.kind == "mcp"]
+        with mock.patch.object(cr.time, "strftime", return_value="20260101-000000"):
+            cr.apply_plan(items[:1])
+            cr.apply_plan(items[1:])
+        dirs = sorted(cr.QUARANTINE_ROOT.iterdir())
+        self.assertEqual(len(dirs), 2)
+        for d in dirs:
+            self.assertEqual(len(cr.load_json(d / "manifest.json")["edits"]), 1)
+
+    def test_restore_does_not_write_through_a_dangling_symlink(self):
+        p = self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        cr.apply_plan([i for i in self.items() if i.kind == "mcp"])
+        p.unlink()
+        target = self.home / "elsewhere" / "target.json"
+        target.parent.mkdir()
+        os.symlink(target, p)
+        out = self.restore_latest()
+        self.assertFalse(os.path.lexists(target))
+        self.assertTrue(p.is_symlink())
+        self.assertIn(f"SKIP {p}", out)
 
     def test_quarantine_folders_are_private(self):
         self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}}})

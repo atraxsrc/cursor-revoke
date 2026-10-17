@@ -202,8 +202,20 @@ def write_json_atomic(p, data):
 
 
 def encode_path(p):
-    # A flat, unique file name for a path: every non-alphanumeric character -> "-".
+    # A flat, readable file name for a path: every non-alphanumeric character
+    # -> "-". NOT unique ("my-app" and "my/app" match): use free_dest for that.
     return re.sub(r"[^A-Za-z0-9]", "-", str(p))
+
+
+def free_dest(parent, p):
+    """A path in parent named after p that nothing exists at yet. Names are
+    kept short (file name limit) and get a numeric suffix on a clash, so
+    nothing already in the quarantine is ever overwritten."""
+    name = encode_path(p)[-200:]
+    dest, n = parent / name, 1
+    while os.path.lexists(dest):
+        dest, n = parent / f"{name}.{n}", n + 1
+    return dest
 
 
 def short_home(p):
@@ -678,11 +690,17 @@ def get_path(data, path):
 
 def apply_plan(plan):
     ts = time.strftime("%Y%m%d-%H%M%S")
-    qdir = QUARANTINE_ROOT / ts
     # The quarantine holds project data and config backups: owner-only.
     QUARANTINE_ROOT.mkdir(parents=True, exist_ok=True)
     os.chmod(QUARANTINE_ROOT, 0o700)
-    qdir.mkdir(mode=0o700, exist_ok=True)
+    # One fresh folder per run, even for two runs in the same second.
+    qdir, n = QUARANTINE_ROOT / ts, 1
+    while True:
+        try:
+            qdir.mkdir(mode=0o700)
+            break
+        except FileExistsError:
+            qdir, n = QUARANTINE_ROOT / f"{ts}-{n}", n + 1
     os.chmod(qdir, 0o700)
     # "edits" records each JSON entry removed (or, for harden, added; for a
     # sandbox reset, the old and new value) so that --restore can undo exactly
@@ -701,15 +719,33 @@ def apply_plan(plan):
 
     def backup(p):
         if p.exists():
-            dest = qdir / "backup" / encode_path(p)
-            dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            (qdir / "backup").mkdir(mode=0o700, exist_ok=True)
+            dest = free_dest(qdir / "backup", p)
             shutil.copy2(p, dest)
             manifest["backups"].append({"original": str(p), "copy": str(dest)})
 
-    def edit(file, path, **undo):
-        manifest["edits"].append({"file": str(file), "path": path, **undo})
+    try:
+        apply_files(by_file, backup, manifest, log)
+        apply_moves(moves, qdir, manifest, log)
+    finally:
+        # Always record what did happen, so it can be undone even after a crash.
+        write_json_atomic(qdir / "manifest.json", manifest)
+    log.append("")
+    log.append(f"Everything removed is in {qdir}")
+    log.append(f"Undo:  {sys.argv[0]} --restore {qdir}")
+    log.append(f"Once you're sure, delete it for good:  rm -rf {qdir}")
+    return log
 
+
+def apply_files(by_file, backup, manifest, log):
+    """JSON edits, one file at a time. A file whose backup or write fails is
+    logged FAIL and none of its edits go into the manifest."""
     for file, items in by_file.items():
+        pending = []
+
+        def edit(file, path, **undo):
+            pending.append({"file": str(file), "path": path, **undo})
+
         p = Path(file)
         data = load_json(p)
         created = False
@@ -720,7 +756,11 @@ def apply_plan(plan):
             log.append(f"SKIP {file}: unreadable")
             continue
         if not created:
-            backup(p)
+            try:
+                backup(p)
+            except OSError as e:
+                log.append(f"FAIL {file}: {e}")
+                continue
         changed = False
         for it in items:
             ok = False
@@ -777,30 +817,30 @@ def apply_plan(plan):
                 log.append(f"SKIP {file}: unknown action {it.op}")
             changed = changed or ok
         if changed:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            write_json_atomic(p, data)
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                write_json_atomic(p, data)
+            except OSError as e:
+                log.append(f"FAIL {file}: {e} (not changed)")
+                continue
+            manifest["edits"].extend(pending)
 
-    # moves into quarantine (project data folders only, never config files)
+
+def apply_moves(moves, qdir, manifest, log):
+    """Moves into quarantine: project data folders only, never config files."""
     for it in moves:
         src = Path(it.file)
         if it.kind != "projdir":
             log.append(f"SKIP {src}: only project data folders are moved")
             continue
-        dest = qdir / "projects" / encode_path(it.file)
-        dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:
+            (qdir / "projects").mkdir(mode=0o700, exist_ok=True)
+            dest = free_dest(qdir / "projects", it.file)
             shutil.move(str(src), str(dest))
             manifest["moves"].append({"original": str(src), "quarantined": str(dest)})
             log.append(f"OK   quarantined {src}")
         except OSError as e:
             log.append(f"FAIL {src}: {e}")
-
-    write_json_atomic(qdir / "manifest.json", manifest)
-    log.append("")
-    log.append(f"Everything removed is in {qdir}")
-    log.append(f"Undo:  {sys.argv[0]} --restore {qdir}")
-    log.append(f"Once you're sure, delete it for good:  rm -rf {qdir}")
-    return log
 
 
 def put_back(data, e):
@@ -850,7 +890,7 @@ def restore(qdir):
         sys.exit(f"No manifest.json in {qdir}")
     for m in reversed(as_list(manifest.get("moves"))):
         src, dest = Path(m["quarantined"]), Path(m["original"])
-        if dest.exists():
+        if os.path.lexists(dest):
             print(f"SKIP {dest} already exists")
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -866,14 +906,23 @@ def restore(qdir):
     for file in sorted(edits):
         data = load_json(file)
         if isinstance(data, dict):
-            n = sum(put_back(data, e) for e in edits[file])
+            # Newest first: each edit's "index" was taken after the earlier ones.
+            n = sum(put_back(data, e) for e in reversed(edits[file]))
             if n:
                 write_json_atomic(Path(file), data)
             print(f"OK   put {n} entr{'y' if n == 1 else 'ies'} back into {file}")
-        elif file in backups and path_state(file) == "missing":
+        elif file in backups and not os.path.lexists(file):
+            # Nothing at all at the path (not even a dangling symlink): write
+            # the backup's content without following links.
+            old = load_json(backups[file])
+            if not isinstance(old, dict):
+                print(f"SKIP {file}: backup {backups[file]} is unreadable")
+                continue
             Path(file).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(backups[file], file)
+            write_json_atomic(Path(file), old)
             print(f"OK   restored {file} from backup")
+        elif file in backups and os.path.islink(file):
+            print(f"SKIP {file}: a symlink is in the way, not touched; the old copy is {backups[file]}")
         elif file in backups:
             print(f"SKIP {file}: unreadable, not touched; the old copy is {backups[file]}")
         else:
