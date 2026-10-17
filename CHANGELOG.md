@@ -10,6 +10,7 @@ First release.
 - One-tick hardening: deny rules for keys and `.env` files in `~/.cursor/cli-config.json` (Cursor CLI agent only).
 - Quarantine at `~/.cursor-revoke-quarantine/<timestamp>/`, JSON backups, `--restore`.
 - Files in an unknown format are shown and never rewritten.
+- `--report` shows where each item lives (`[global]` or the project path) and marks stale items with `x` (risky `!`, locked `#`).
 - `--report`, `--only`, `--dry-run`, `--roots`, `--pause`, `--accent`, `NO_COLOR`.
 - `--schedule weekly|daily|off` and `--notify`: a systemd user timer with a desktop notification.
 - `.deb`, `.rpm` and Arch packages, `install.sh` / `uninstall.sh`, launcher entry, CI.
