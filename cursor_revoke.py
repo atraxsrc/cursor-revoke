@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -106,12 +107,36 @@ def clean(s):
                    for ch in s)
 
 
-def load_json(p):
+# Config files bigger than this are not read at all (treated as unknown format).
+MAX_CONFIG_BYTES = 1024 * 1024
+
+
+def load_json(p, limit=None):
+    """Parsed JSON, or None. With limit, a file longer than limit bytes is None
+    and is never read past limit + 1 bytes. Pathological input (deep nesting,
+    huge values) is None too, never an exception."""
     try:
         with open(p, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
+            if limit is None:
+                return json.load(fh)
+            text = fh.read(limit + 1)
+            if len(text.encode("utf-8")) > limit:
+                return None
+            return json.loads(text)
+    except (OSError, ValueError, RecursionError, MemoryError):
         return None
+
+
+def file_kind(p):
+    """"regular", "missing", "special" (a symlink, device, FIFO, folder...) or
+    "unknown" (cannot be checked). Uses lstat: a symlink is never followed."""
+    try:
+        st = os.lstat(p)
+    except (FileNotFoundError, NotADirectoryError):
+        return "missing"
+    except (OSError, ValueError):
+        return "unknown"
+    return "regular" if stat.S_ISREG(st.st_mode) else "special"
 
 
 # Cursor's files are hand-editable, so any key can hold the wrong type.
@@ -161,6 +186,11 @@ def is_broad(rule):
     tool, arg = m.group(1), m.group(2)
     if tool in ("Shell", "Read", "Write", "Mcp"):
         if arg is None or arg in ("*", "**", ":*"):
+            return True
+    if tool in ("Read", "Write"):
+        home = str(HOME).rstrip("/")
+        a = "~" + arg[len(home):] if home and arg.startswith(home + "/") else arg
+        if a in ("~/*", "~/.*"):     # everything (or every dotfile) in the home folder
             return True
     if tool == "Shell":
         base = re.split(r"[:\s]", rule.strip()[6:-1].strip(), 1)[0]
@@ -345,9 +375,14 @@ def probe(base, parts, budget):
 
 
 def resolve_project(name, known):
-    for k in known:
-        if encode_project(k) == name:
+    # Several known folders can share one encoding ("my-app" and "my/app"):
+    # prefer one that exists, so a live project is never marked MISSING.
+    matches = sorted(k for k in known if encode_project(k) == name)
+    for k in matches:
+        if path_state(k) == "exists":
             return k
+    if matches:
+        return matches[0]
     found = probe(Path("/"), name.split("-"), [10000])
     return str(found) if found else None
 
@@ -451,14 +486,31 @@ def find_cursor_dirs(roots):
 
 
 def load_config(file):
-    """(data, items): items holds one locked "unknown" item when the file exists
-    but is not a JSON object (JSONC, broken, unreadable). Missing file: (None, [])."""
-    data = load_json(file)
+    """(data, items): items holds one locked item when the file exists but is a
+    symlink or not a regular file, is over MAX_CONFIG_BYTES, or is not a JSON
+    object (JSONC, broken, unreadable). Missing file: (None, [])."""
+    kind = file_kind(file)
+    if kind == "missing":
+        return None, []
+    if kind == "special":
+        return None, [special_item(file, None)]
+    try:
+        too_big = os.lstat(file).st_size > MAX_CONFIG_BYTES
+    except OSError:
+        too_big = False
+    data = None if too_big else load_json(file, MAX_CONFIG_BYTES)
     if isinstance(data, dict):
         return data, []
-    if data is None and path_state(file) == "missing":
-        return None, []
     return None, [unknown_item(file, None)]
+
+
+def special_item(file, scope):
+    title = f"{short_home(file)}: symlink or not a regular file, not touched"
+    return Item("unknown", f"{file}::special", title,
+                detail=[f"File: {file}",
+                        "A symlink, device, pipe or folder instead of a plain file.",
+                        "cursor-revoke never edits through a link (it may point at another config file)."],
+                name=title, where=scope or "", file=str(file), locked=True)
 
 
 def unknown_item(file, scope, what=""):
@@ -551,6 +603,9 @@ def scan_autorun(file, scope):
         elif (isinstance(val, list) and val and all(isinstance(e, str) for e in val)):
             # Key names are unverified. A block/deny list is protective: show, never remove.
             protective = any(w in key.lower() for w in ("block", "deny", "disallow"))
+            if not protective and "allow" not in key.lower():
+                other.append(key)
+                continue
             for e in unique(val):
                 if protective:
                     items.append(mk("block", file, scope, [key], e, f"{key}: {e}", locked=True,
@@ -623,6 +678,20 @@ def scan_mcp(file, scope):
     return items
 
 
+GUARD_NOTE = "may be a safety check; removing it can allow what it blocked"
+
+
+def guard_event(event):
+    """Cursor's before* hooks (beforeShellExecution, beforeMCPExecution,
+    beforeReadFile...) can deny actions: removing one can widen access."""
+    return str(event).lower().startswith("before")
+
+
+def bulk_risky(it):
+    """What the TUI's "tick all risky" key ticks: risky items except guard hooks."""
+    return it.risky and not (it.kind == "hook" and guard_event(it.value))
+
+
 def scan_hooks(file, scope):
     data, items = load_config(file)
     if items:
@@ -641,10 +710,11 @@ def scan_hooks(file, scope):
             elif isinstance(as_dict(e).get("command"), str):
                 cmds.append(e["command"])
         shown = [f"  {c}" for c in cmds] or ["  " + json.dumps(entries)[:300]]
+        guard = [GUARD_NOTE] if guard_event(event) else []
         items.append(mk("hook", file, scope, ["hooks"], event, f"hook: {event}",
                         risky=True, op="pop_key",
-                        detail=[f"In {file}", "Runs commands automatically on this Cursor event:"]
-                        + shown))
+                        detail=[f"In {file}"] + guard
+                        + ["Runs commands automatically on this Cursor event:"] + shown))
     return items
 
 
@@ -762,7 +832,10 @@ def apply_files(by_file, backup, manifest, log):
             pending.append({"file": str(file), "path": path, **undo})
 
         p = Path(file)
-        data = load_json(p)
+        if file_kind(p) == "special":
+            log.append(f"SKIP {file}: symlink or not a regular file")
+            continue
+        data = load_json(p, MAX_CONFIG_BYTES)
         created = False
         if (data is None and any(i.op == "harden" for i in items)
                 and p == Path(GLOBAL_CLI) and path_state(p) == "missing"):
@@ -832,6 +905,9 @@ def apply_files(by_file, backup, manifest, log):
                 log.append(f"SKIP {file}: unknown action {it.op}")
             changed = changed or ok
         if changed:
+            if file_kind(p) == "special":    # swapped for a link since it was read
+                log.append(f"SKIP {file}: symlink or not a regular file")
+                continue
             try:
                 p.parent.mkdir(parents=True, exist_ok=True)
                 write_json_atomic(p, data)
@@ -898,18 +974,28 @@ def put_back(data, e):
     return changed
 
 
-def restore(qdir):
+def restore(qdir, dry_run=False):
+    """Undo a run. With dry_run, only print what would be restored."""
     qdir = Path(qdir)
     manifest = load_json(qdir / "manifest.json")
     if not isinstance(manifest, dict):
         sys.exit(clean(f"No manifest.json in {qdir}"))
+    if dry_run:
+        print("DRY RUN: nothing will be changed.")
     for m in reversed(as_list(manifest.get("moves"))):
         src, dest = Path(m["quarantined"]), Path(m["original"])
         if os.path.lexists(dest):
             print(clean(f"SKIP {dest} already exists"))
             continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dest))
+        if dry_run:
+            print(clean(f"DRY  would move {src} back to {dest}"))
+            continue
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
+        except OSError as e:
+            print(clean(f"FAIL {dest}: {e}"))
+            continue
         print(clean(f"OK   restored {dest}"))
     # Removed JSON entries go back into the file as it is NOW, so whatever Cursor
     # wrote since the run is kept. The full backup is only used when the file
@@ -919,13 +1005,23 @@ def restore(qdir):
         edits.setdefault(e["file"], []).append(e)
     backups = {b["original"]: b["copy"] for b in as_list(manifest.get("backups"))}
     for file in sorted(edits):
-        data = load_json(file)
+        if file_kind(file) == "special":
+            print(clean(f"SKIP {file}: symlink or not a regular file"))
+            continue
+        data = load_json(file, MAX_CONFIG_BYTES)
         if isinstance(data, dict):
             # Newest first: each edit's "index" was taken after the earlier ones.
             n = sum(put_back(data, e) for e in reversed(edits[file]))
+            entries = f"{n} entr{'y' if n == 1 else 'ies'}"
+            if dry_run:
+                print(clean(f"DRY  would put {entries} back into {file}"))
+                continue
             if n:
+                if file_kind(file) == "special":   # swapped for a link since it was read
+                    print(clean(f"SKIP {file}: symlink or not a regular file"))
+                    continue
                 write_json_atomic(Path(file), data)
-            print(clean(f"OK   put {n} entr{'y' if n == 1 else 'ies'} back into {file}"))
+            print(clean(f"OK   put {entries} back into {file}"))
         elif file in backups and not os.path.lexists(file):
             # Nothing at all at the path (not even a dangling symlink): write
             # the backup's content without following links.
@@ -933,11 +1029,12 @@ def restore(qdir):
             if not isinstance(old, dict):
                 print(clean(f"SKIP {file}: backup {backups[file]} is unreadable"))
                 continue
+            if dry_run:
+                print(clean(f"DRY  would restore {file} from backup"))
+                continue
             Path(file).parent.mkdir(parents=True, exist_ok=True)
             write_json_atomic(Path(file), old)
             print(clean(f"OK   restored {file} from backup"))
-        elif file in backups and os.path.islink(file):
-            print(clean(f"SKIP {file}: a symlink is in the way, not touched; the old copy is {backups[file]}"))
         elif file in backups:
             print(clean(f"SKIP {file}: unreadable, not touched; the old copy is {backups[file]}"))
         else:
@@ -1347,7 +1444,7 @@ class App:
             elif k == ord("s"):
                 tick(visible, lambda it: it.stale, True)
             elif k == ord("r"):
-                tick(visible, lambda it: it.risky, True)
+                tick(visible, bulk_risky, True)
             elif k == ord("v"):
                 mode = modes[(modes.index(mode) + 1) % len(modes)]
                 cur = top = 0
@@ -1412,8 +1509,8 @@ class App:
             return None
         # Check again right before applying: Cursor may have been started meanwhile.
         pids = running_cursor()
-        warn = f"Cursor is running (pid {', '.join(map(str, pids[:5]))}) - close it first! " if pids else ""
-        if self.prompt(warn + "Type YES to apply these changes: ") != "YES":
+        warn = f" (Cursor is running, pid {', '.join(map(str, pids[:5]))}: close it first!)" if pids else ""
+        if self.prompt("Type YES to apply these changes" + warn + ": ") != "YES":
             return None
         if self.dry_run:
             self.final = (["DRY RUN: nothing was changed. Without --dry-run this would:"]
@@ -1484,7 +1581,7 @@ def run(args, ap):
         sys.exit(schedule(args.schedule, args.dry_run))
     if args.restore:
         warn_if_running()
-        restore(args.restore)
+        restore(args.restore, args.dry_run)
         return
     print("Scanning Cursor footprint (this can take a minute on a big home folder)...", file=sys.stderr)
     cats = scan_all(args.roots)

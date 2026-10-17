@@ -1064,5 +1064,254 @@ class TestScheduleFlag(FakeHome):
         self.assertFalse(self.dropin().exists())
 
 
+class TestSpecialFiles(FakeHome):
+    """I1/I2: symlinked, non-regular, oversized or pathological config files."""
+
+    def items(self, roots=None):
+        return [i for c in cr.scan_all(roots or [self.home]) for i in c.items]
+
+    def for_file(self, p):
+        return [i for i in self.items() if i.file == str(p)]
+
+    def assert_special(self, got):
+        self.assertEqual(len(got), 1, [i.title for i in got])
+        self.assertEqual((got[0].kind, got[0].locked, got[0].op), ("unknown", True, ""))
+        self.assertIn("symlink or not a regular file, not touched", got[0].title)
+
+    def test_project_mcp_symlinked_to_global_is_one_locked_item(self):
+        g = self.write(".cursor/mcp.json", {"mcpServers": {"srv": {"env": {"TOKEN": "x"}}}})
+        link = self.home / "code/evil/.cursor/mcp.json"
+        link.parent.mkdir(parents=True)
+        os.symlink(g, link)
+        self.assert_special(self.for_file(link))
+        self.assertEqual(len([i for i in self.items() if i.kind == "mcp"]), 1)
+
+    def test_global_symlinked_file_is_one_locked_item_and_no_harden(self):
+        real = self.write("dotfiles/cli-config.json", {"permissions": {"allow": ["Shell(*)"]}})
+        cr.GLOBAL_CLI.parent.mkdir(parents=True)
+        os.symlink(real, cr.GLOBAL_CLI)
+        self.assert_special(self.for_file(cr.GLOBAL_CLI))
+
+    def test_device_and_fifo_are_one_locked_item(self):
+        d = self.home / "code/app/.cursor"
+        d.mkdir(parents=True)
+        os.symlink("/dev/null", d / "hooks.json")
+        os.mkfifo(d / "mcp.json")
+        self.assert_special(self.for_file(d / "hooks.json"))
+        self.assert_special(self.for_file(d / "mcp.json"))
+
+    def test_oversized_file_is_unknown_and_not_read_whole(self):
+        p = self.write_text("code/app/.cursor/hooks.json",
+                            json.dumps({"hooks": {"stop": ["x" * (1024 * 1024)]}}))
+        got = self.for_file(p)
+        self.assertEqual(len(got), 1, [i.title for i in got])
+        self.assertEqual((got[0].kind, got[0].locked), ("unknown", True))
+        self.assertIn("unknown format, not touched", got[0].title)
+        self.assertIsNone(cr.load_json(p, cr.MAX_CONFIG_BYTES))
+
+    def test_deep_nesting_is_unknown_not_a_crash(self):
+        p = self.write_text("code/app/.cursor/hooks.json", "[" * 200000 + "]" * 200000)
+        got = self.for_file(p)
+        self.assertEqual([(i.kind, i.locked) for i in got], [("unknown", True)])
+
+    def test_memory_error_while_parsing_is_unknown(self):
+        p = self.write(".cursor/mcp.json", {"mcpServers": {}})
+        with mock.patch.object(cr.json, "load", side_effect=MemoryError), \
+                mock.patch.object(cr.json, "loads", side_effect=MemoryError):
+            data, items = cr.load_config(p)
+        self.assertIsNone(data)
+        self.assertEqual([(i.kind, i.locked) for i in items], [("unknown", True)])
+
+    def test_apply_skips_a_file_turned_into_a_symlink(self):
+        p = self.write("code/app/.cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        plan = [i for i in self.items() if i.kind == "mcp"]
+        self.assertEqual(len(plan), 1)
+        target = self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}, "other": {"t": 1}}})
+        before = target.read_bytes()
+        p.unlink()
+        os.symlink(target, p)
+        log = cr.apply_plan(plan)
+        self.assertIn(f"SKIP {p}: symlink or not a regular file", log)
+        self.assertTrue(p.is_symlink())
+        self.assertEqual(target.read_bytes(), before)
+        self.assertEqual(self.manifest()["edits"], [])
+        self.assertEqual(self.manifest()["backups"], [])
+
+    def test_apply_rechecks_right_before_writing(self):
+        p = self.write("code/app/.cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        plan = [i for i in self.items() if i.kind == "mcp"]
+        target = self.write("elsewhere.json", {"mcpServers": {"srv": {}}})
+        before = target.read_bytes()
+        real_load = cr.load_json
+
+        def load_then_swap(f, *a, **kw):
+            data = real_load(f, *a, **kw)
+            if Path(f) == p:
+                p.unlink()
+                os.symlink(target, p)
+            return data
+
+        with mock.patch.object(cr, "load_json", side_effect=load_then_swap):
+            log = cr.apply_plan(plan)
+        self.assertIn(f"SKIP {p}: symlink or not a regular file", log)
+        self.assertTrue(p.is_symlink())
+        self.assertEqual(target.read_bytes(), before)
+        self.assertEqual(self.manifest()["edits"], [])
+
+    def test_restore_skips_a_file_turned_into_a_symlink(self):
+        p = self.write("code/app/.cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        cr.apply_plan([i for i in self.items() if i.kind == "mcp"])
+        target = self.write("elsewhere.json", {"mcpServers": {}})
+        before = target.read_bytes()
+        p.unlink()
+        os.symlink(target, p)
+        out = self.restore_latest()
+        self.assertIn(f"SKIP {p}: symlink or not a regular file", out)
+        self.assertTrue(p.is_symlink())
+        self.assertEqual(target.read_bytes(), before)
+
+
+class TestSpecialFilesCli(CliBase):
+    def test_report_survives_fifo_deep_nesting_and_huge_file(self):
+        d = self.home / "code/app/.cursor"
+        d.mkdir(parents=True)
+        os.mkfifo(d / "mcp.json")
+        (d / "hooks.json").write_text("[" * 200000 + "]" * 200000)
+        (d / "cli.json").write_text(json.dumps({"permissions": {"allow": ["x" * (1024 * 1024)]}}))
+        for flag in ("--report", "--notify"):
+            r = self.run_cli(flag, "--roots", str(self.home / "code"))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
+
+class TestRestoreRobust(FakeHome):
+    def items(self):
+        return [i for c in cr.scan_all([self.home]) for i in c.items]
+
+    def setup_run(self):
+        p = self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        proj = cr.PROJECTS_DIR / "12345"
+        (proj / "mcps").mkdir(parents=True)
+        (proj / "mcps" / "a.json").write_text("{}")
+        cr.apply_plan([i for i in self.items() if i.kind in ("mcp", "projdir")])
+        return p, proj
+
+    def test_failed_move_back_does_not_stop_json_restore(self):
+        p, proj = self.setup_run()
+        import shutil
+        shutil.rmtree(self.manifest()["moves"][0]["quarantined"])
+        out = self.restore_latest()
+        self.assertIn(f"FAIL {proj}", out)
+        self.assertEqual(cr.load_json(p), {"mcpServers": {"srv": {}}})
+
+    def test_failed_move_back_output_is_sanitized(self):
+        p, proj = self.setup_run()
+        with mock.patch.object(cr.shutil, "move", side_effect=OSError("bad\x1b[2K")):
+            out = self.restore_latest()
+        self.assertIn("FAIL", out)
+        self.assertNotIn("\x1b", out)
+        self.assertEqual(cr.load_json(p), {"mcpServers": {"srv": {}}})
+
+
+class TestRestoreDryRun(CliBase):
+    def test_restore_dry_run_changes_nothing(self):
+        p = self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}, "b": {}}})
+        proj = cr.PROJECTS_DIR / "12345"
+        (proj / "mcps").mkdir(parents=True)
+        items = [i for c in cr.scan_all([self.home]) for i in c.items]
+        cr.apply_plan([i for i in items if i.kind in ("mcp", "projdir")])
+        qdir = self.latest_quarantine()
+        layout = sorted(str(x) for x in self.home.rglob("*"))
+        data = {x: x.read_bytes() for x in self.home.rglob("*") if x.is_file()}
+        r = self.run_cli("--restore", str(qdir), "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sorted(str(x) for x in self.home.rglob("*")), layout)
+        self.assertEqual({x: x.read_bytes() for x in self.home.rglob("*") if x.is_file()}, data)
+        self.assertIn(str(proj), r.stdout)
+        self.assertIn("2 entries", r.stdout)
+        self.assertIn("would", r.stdout)
+
+
+class TestGuardHooks(FakeHome):
+    def hooks(self):
+        self.write(".cursor/hooks.json", {"hooks": {"beforeShellExecution": [{"command": "./guard.sh"}],
+                                                    "beforeMCPExecution": ["./g2.sh"],
+                                                    "stop": [{"command": "./x.sh"}]}})
+        cats = cr.scan_all([self.home / "nowhere"])
+        return cats[2], {i.value: i for i in cats[2].items}
+
+    def test_before_hooks_carry_a_warning(self):
+        _, by = self.hooks()
+        for ev in ("beforeShellExecution", "beforeMCPExecution"):
+            self.assertIn("may be a safety check; removing it can allow what it blocked", by[ev].detail)
+            self.assertEqual((by[ev].op, by[ev].locked), ("pop_key", False))
+        self.assertFalse(any("safety check" in d for d in by["stop"].detail))
+
+    def test_r_key_skips_guard_hooks_space_still_ticks(self):
+        cat, by = self.hooks()
+        app = cr.App.__new__(cr.App)
+        app.scr, app.cats, app.dry_run, app.final, app.colors = (
+            FakeScreen([ord("r"), 27]), [cat], True, [], False)
+        app.checklist(cat)
+        self.assertEqual([i.value for i in cr.chosen(cat.items)], ["stop"])
+        cr.tick([by["beforeShellExecution"]], lambda it: True, True)
+        self.assertTrue(by["beforeShellExecution"].selected)
+
+
+class TestAllowlistKeysOnly(FakeHome):
+    def test_only_allow_named_keys_are_removable(self):
+        self.write(".cursor/permissions.json", {"fooList": ["x"], "trustedThings": ["y"],
+                                                "commandAllowList": ["git"], "denyList": ["rm"],
+                                                "disallowed": ["z"]})
+        items = [i for c in cr.scan_all([self.home / "nowhere"]) for i in c.items
+                 if i.file.endswith("permissions.json")]
+        removable = {i.value for i in items if i.op and not i.locked}
+        self.assertEqual(removable, {"git"})
+        other = [i for i in items if i.kind == "other"]
+        self.assertEqual(len(other), 1)
+        self.assertIn("fooList", other[0].title)
+        self.assertIn("trustedThings", other[0].title)
+        self.assertEqual({i.value for i in items if i.kind == "block"}, {"rm", "z"})
+
+
+class TestResolveProject(FakeHome):
+    def test_existing_candidate_wins_over_missing_lookalike(self):
+        live = self.home / "my-app"
+        live.mkdir()
+        gone = self.home / "my" / "app"
+        name = cr.encode_project(str(live))
+        self.assertEqual(cr.encode_project(str(gone)), name)
+        for known in ([str(gone), str(live)], [str(live), str(gone)]):
+            self.assertEqual(cr.resolve_project(name, known), str(live))
+
+    def test_no_existing_candidate_is_deterministic(self):
+        a, b = str(self.home / "x" / "y-z"), str(self.home / "x-y" / "z")
+        name = cr.encode_project(a)
+        self.assertEqual(cr.resolve_project(name, [b, a]), min(a, b))
+        self.assertEqual(cr.resolve_project(name, [a, b]), min(a, b))
+
+
+class TestSmallFixes(unittest.TestCase):
+    def test_home_level_wildcards_are_broad(self):
+        home = str(cr.HOME).rstrip("/")
+        for tool in ("Read", "Write"):
+            for arg in ("~/*", "~/.*", f"{home}/*", f"{home}/.*"):
+                self.assertTrue(cr.is_broad(f"{tool}({arg})"), f"{tool}({arg})")
+        self.assertFalse(cr.is_broad("Read(~/code/*)"))
+
+    def test_yes_prompt_comes_before_running_warning(self):
+        it = cr.Item("mcp", "k", "MCP server: a", file="/home/user/.cursor/mcp.json",
+                     jpath=["mcpServers"], value="a", op="pop_key", selected=True)
+        app = cr.App.__new__(cr.App)
+        app.scr, app.cats, app.dry_run, app.final, app.colors = (
+            FakeScreen([ord("y")]), [cr.Category("C", "", [it])], True, [], False)
+        app.prompt = mock.Mock(return_value="")
+        with mock.patch.object(cr, "running_cursor", return_value=[42]):
+            app.review()
+        msg = app.prompt.call_args[0][0]
+        self.assertTrue(msg.startswith("Type YES to apply"), msg)
+        self.assertIn("Cursor is running", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

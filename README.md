@@ -27,7 +27,7 @@ Cursor's agent can run shell commands, read files, reach the network and call MC
 - **Full inventory**: agent allow and deny rules, auto-run rules, approval mode, sandbox settings, MCP servers, hooks and per-project agent data folders, both global (`~/.cursor`) and per project (`<project>/.cursor`).
 - **Grouped checkboxes**: STALE (project folder gone), RISKY (broad rules such as `Shell(*)` or `Write(**)`, auto-run rules, wide sandbox fields, MCP servers, hooks) and OK. Tick a whole group or one item at a time.
 - **Hardening**: one tick adds `Read(...)` deny rules for `~/.ssh`, `~/.aws`, `~/.gnupg`, `.env`, `*.pem` and `*.key` to `~/.cursor/cli-config.json`. This covers the **Cursor CLI agent only**; it is not confirmed to protect the editor or the Agents Window.
-- **Only narrows access**: removing never widens anything. Deny and block rules are never removed, and sandbox files are edited field by field, never deleted.
+- **Only narrows access**: removing narrows access, with one exception: a hook on a `before...` event (such as `beforeShellExecution`, `beforeMCPExecution` or `beforeReadFile`) may be a safety check that blocks actions, so removing it can allow what it blocked. These guard hooks say so in their details and are not ticked by `r`. Deny and block rules are never removed, and sandbox files are edited field by field, never deleted.
 - **Safe by design**: dry-run mode, a review screen, typed `YES` confirmation, JSON backups, quarantine instead of delete, and `--restore`.
 - **Theme-aware**: draws only with your terminal's own palette.
 - **Zero dependencies**: a single Python file using the standard library.
@@ -89,7 +89,7 @@ Project folders are found by walking `--roots` (default: your home) for `.cursor
 | `Enter` | Open a category (menu) / go back (list) |
 | `Space` | Tick an item, or a whole group on its header |
 | `a` / `n` | Tick / untick everything visible |
-| `s` / `r` | Tick all stale / all risky |
+| `s` / `r` | Tick all stale / all risky (guard hooks on `before...` events are left for you to tick one by one) |
 | `v` | View: all, stale, risky, selected |
 | `/` | Search by name or location |
 | `Esc` / `q` | Back / quit |
@@ -142,12 +142,13 @@ export CURSOR_REVOKE_ACCENT=yellow      # make it permanent (~/.bashrc)
 | `~/.cursor/cli-config.json` → `permissions.deny` | Hardening tick | Adds deny rules for keys and `.env` files (file backed up) |
 | `~/.cursor/permissions.json` and `<project>/.cursor/permissions.json` → `autoRun.allow_instructions` | Auto-run allow rules | One entry removed (file backed up) |
 | same files → `autoRun.block_instructions` | Auto-run block rules | Shown only, never removed |
+| same files → other top-level lists of strings | Other allowlists | Only keys whose name contains `allow` are offered, one entry at a time (file backed up). Keys containing `block`, `deny` or `disallow` are shown only. Any other key is listed under "other keys left alone" and never changed |
 | `~/.cursor/sandbox.json` (also `~/.cursor/.cursor/`) and `<project>/.cursor/sandbox.json` | What sandboxed agent commands may read, write and reach | Only fields wider than Cursor's defaults are offered; each is reset to the default or loses one list entry (file backed up). The file is never deleted or quarantined |
 | `~/.cursor/mcp.json` and `<project>/.cursor/mcp.json` → `mcpServers` | MCP servers you added | Entry removed (file backed up) |
-| `~/.cursor/hooks.json` and `<project>/.cursor/hooks.json` → `hooks` | Commands Cursor runs automatically | Entry removed (file backed up) |
+| `~/.cursor/hooks.json` and `<project>/.cursor/hooks.json` → `hooks` | Commands Cursor runs automatically | Entry removed (file backed up). `before...` hooks may be safety checks: removing one can allow what it blocked |
 | `~/.cursor/projects/*` | Per-project agent data folders (MCP descriptors, terminals, canvases, transcripts) | Moved to quarantine |
 
-Any of these files that is not a plain JSON object (comments, trailing commas, a wrong type) is shown as a locked "unknown format, not touched" item and is never rewritten. Project folder names under `~/.cursor/projects` encode the path lossily, so a folder that cannot be matched to a path is shown as "unknown, folder not found" and is **not** pre-ticked; only folders whose project is known to be gone, `tmp-<uuid>` folders and numeric empty-window folders are STALE.
+Any of these files that is not a plain JSON object (comments, trailing commas, a wrong type) or is over 1 MiB is shown as a locked "unknown format, not touched" item and is never rewritten. A file that is a symlink or not a regular file is shown as a locked "symlink or not a regular file, not touched" item and is never read or written. Project folder names under `~/.cursor/projects` encode the path lossily, so a folder that cannot be matched to a path is shown as "unknown, folder not found" and is **not** pre-ticked; only folders whose project is known to be gone, `tmp-<uuid>` folders and numeric empty-window folders are STALE.
 
 Everything removed lands in `~/.cursor-revoke-quarantine/<timestamp>/` together with a `manifest.json`. Check that nothing broke, then delete that folder for good. `--restore` puts back only what that run removed, into the files as they are now, so anything Cursor has written since is kept.
 
