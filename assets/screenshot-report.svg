@@ -1,0 +1,246 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="981" height="723" viewBox="0 0 981 723" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" font-size="14">
+<rect width="981" height="723" rx="12" fill="#16181d"/>
+<circle cx="22" cy="20" r="6" fill="#e06c75"/><circle cx="42" cy="20" r="6" fill="#e5c07b"/><circle cx="62" cy="20" r="6" fill="#98c379"/>
+<text x="490.5" y="25" fill="#6b717d" text-anchor="middle" font-size="13">cursor-revoke --report  ·  Read-only audit</text>
+<text x="18" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
+<text x="45" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">Agent</text>
+<text x="99" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="108" lengthAdjust="spacing">permissions:</text>
+<text x="216" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">6</text>
+<text x="234" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">found,</text>
+<text x="297" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">0</text>
+<text x="315" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">stale,</text>
+<text x="378" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">1</text>
+<text x="396" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">risky</text>
+<text x="450" y="54" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
+<text x="45" y="73" fill="#abb2bf" xml:space="preserve" textLength="45" lengthAdjust="spacing">allow</text>
+<text x="99" y="73" fill="#abb2bf" xml:space="preserve" textLength="45" lengthAdjust="spacing">rule:</text>
+<text x="153" y="73" fill="#abb2bf" xml:space="preserve" textLength="81" lengthAdjust="spacing">Shell(ls)</text>
+<text x="261" y="73" fill="#abb2bf" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
+<text x="27" y="92" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">!</text>
+<text x="45" y="92" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">allow</text>
+<text x="99" y="92" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">rule:</text>
+<text x="153" y="92" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="99" lengthAdjust="spacing">Shell(curl)</text>
+<text x="279" y="92" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">BROAD</text>
+<text x="351" y="92" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
+<text x="72" y="111" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">The</text>
+<text x="108" y="111" fill="#abb2bf" xml:space="preserve" textLength="45" lengthAdjust="spacing">agent</text>
+<text x="162" y="111" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">may</text>
+<text x="198" y="111" fill="#abb2bf" xml:space="preserve" textLength="18" lengthAdjust="spacing">do</text>
+<text x="225" y="111" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">this</text>
+<text x="270" y="111" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">without</text>
+<text x="342" y="111" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">asking.</text>
+<text x="423" y="111" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">This</text>
+<text x="468" y="111" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">rule</text>
+<text x="513" y="111" fill="#abb2bf" xml:space="preserve" textLength="54" lengthAdjust="spacing">grants</text>
+<text x="576" y="111" fill="#abb2bf" xml:space="preserve" textLength="9" lengthAdjust="spacing">a</text>
+<text x="594" y="111" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">lot.</text>
+<text x="27" y="130" fill="#6b717d" xml:space="preserve" textLength="9" lengthAdjust="spacing">#</text>
+<text x="45" y="130" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">approval</text>
+<text x="126" y="130" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">mode:</text>
+<text x="180" y="130" fill="#6b717d" xml:space="preserve" textLength="81" lengthAdjust="spacing">allowlist</text>
+<text x="288" y="130" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
+<text x="72" y="149" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Agent</text>
+<text x="126" y="149" fill="#6b717d" xml:space="preserve" textLength="36" lengthAdjust="spacing">asks</text>
+<text x="171" y="149" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">before</text>
+<text x="234" y="149" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">anything</text>
+<text x="315" y="149" fill="#6b717d" xml:space="preserve" textLength="63" lengthAdjust="spacing">outside</text>
+<text x="387" y="149" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">the</text>
+<text x="423" y="149" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">allow</text>
+<text x="477" y="149" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">list.</text>
+<text x="72" y="168" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">change</text>
+<text x="135" y="168" fill="#6b717d" xml:space="preserve" textLength="36" lengthAdjust="spacing">this</text>
+<text x="180" y="168" fill="#6b717d" xml:space="preserve" textLength="18" lengthAdjust="spacing">in</text>
+<text x="207" y="168" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">Cursor&#x27;s</text>
+<text x="288" y="168" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">settings</text>
+<text x="369" y="168" fill="#6b717d" xml:space="preserve" textLength="126" lengthAdjust="spacing">(cursor-revoke</text>
+<text x="504" y="168" fill="#6b717d" xml:space="preserve" textLength="36" lengthAdjust="spacing">does</text>
+<text x="549" y="168" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">not</text>
+<text x="585" y="168" fill="#6b717d" xml:space="preserve" textLength="63" lengthAdjust="spacing">rewrite</text>
+<text x="657" y="168" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">it)</text>
+<text x="45" y="187" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">HARDEN:</text>
+<text x="117" y="187" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">stop</text>
+<text x="162" y="187" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">the</text>
+<text x="198" y="187" fill="#abb2bf" xml:space="preserve" textLength="54" lengthAdjust="spacing">Cursor</text>
+<text x="261" y="187" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">CLI</text>
+<text x="297" y="187" fill="#abb2bf" xml:space="preserve" textLength="45" lengthAdjust="spacing">agent</text>
+<text x="351" y="187" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">reading</text>
+<text x="423" y="187" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">keys</text>
+<text x="468" y="187" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">and</text>
+<text x="504" y="187" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">.env</text>
+<text x="549" y="187" fill="#abb2bf" xml:space="preserve" textLength="45" lengthAdjust="spacing">files</text>
+<text x="621" y="187" fill="#abb2bf" xml:space="preserve" textLength="18" lengthAdjust="spacing">+7</text>
+<text x="648" y="187" fill="#abb2bf" xml:space="preserve" textLength="45" lengthAdjust="spacing">rules</text>
+<text x="720" y="187" fill="#abb2bf" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
+<text x="27" y="206" fill="#6b717d" xml:space="preserve" textLength="9" lengthAdjust="spacing">#</text>
+<text x="45" y="206" fill="#6b717d" xml:space="preserve" textLength="171" lengthAdjust="spacing">block_instructions:</text>
+<text x="225" y="206" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Never</text>
+<text x="279" y="206" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">touch</text>
+<text x="333" y="206" fill="#6b717d" xml:space="preserve" textLength="36" lengthAdjust="spacing">prod</text>
+<text x="396" y="206" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
+<text x="72" y="225" fill="#6b717d" xml:space="preserve" textLength="90" lengthAdjust="spacing">Protective</text>
+<text x="171" y="225" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">rule,</text>
+<text x="225" y="225" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">shown</text>
+<text x="279" y="225" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">for</text>
+<text x="315" y="225" fill="#6b717d" xml:space="preserve" textLength="117" lengthAdjust="spacing">completeness.</text>
+<text x="441" y="225" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Never</text>
+<text x="495" y="225" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">removed.</text>
+<text x="27" y="244" fill="#6b717d" xml:space="preserve" textLength="9" lengthAdjust="spacing">#</text>
+<text x="45" y="244" fill="#6b717d" xml:space="preserve" textLength="171" lengthAdjust="spacing">block_instructions:</text>
+<text x="225" y="244" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">Ask</text>
+<text x="261" y="244" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">before</text>
+<text x="324" y="244" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">deleting</text>
+<text x="423" y="244" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
+<text x="72" y="263" fill="#6b717d" xml:space="preserve" textLength="90" lengthAdjust="spacing">Protective</text>
+<text x="171" y="263" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">rule,</text>
+<text x="225" y="263" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">shown</text>
+<text x="279" y="263" fill="#6b717d" xml:space="preserve" textLength="27" lengthAdjust="spacing">for</text>
+<text x="315" y="263" fill="#6b717d" xml:space="preserve" textLength="117" lengthAdjust="spacing">completeness.</text>
+<text x="441" y="263" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Never</text>
+<text x="495" y="263" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">removed.</text>
+<text x="18" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
+<text x="45" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="63" lengthAdjust="spacing">Sandbox</text>
+<text x="117" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="81" lengthAdjust="spacing">settings:</text>
+<text x="207" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">2</text>
+<text x="225" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">found,</text>
+<text x="288" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">0</text>
+<text x="306" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">stale,</text>
+<text x="369" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">1</text>
+<text x="387" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">risky</text>
+<text x="441" y="301" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
+<text x="27" y="320" fill="#6b717d" xml:space="preserve" textLength="9" lengthAdjust="spacing">#</text>
+<text x="45" y="320" fill="#6b717d" xml:space="preserve" textLength="63" lengthAdjust="spacing">sandbox</text>
+<text x="117" y="320" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">settings</text>
+<text x="198" y="320" fill="#6b717d" xml:space="preserve" textLength="18" lengthAdjust="spacing">at</text>
+<text x="225" y="320" fill="#6b717d" xml:space="preserve" textLength="18" lengthAdjust="spacing">or</text>
+<text x="252" y="320" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">stricter</text>
+<text x="333" y="320" fill="#6b717d" xml:space="preserve" textLength="36" lengthAdjust="spacing">than</text>
+<text x="378" y="320" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">Cursor&#x27;s</text>
+<text x="459" y="320" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">defaults</text>
+<text x="558" y="320" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">[global]</text>
+<text x="72" y="339" fill="#6b717d" xml:space="preserve" textLength="63" lengthAdjust="spacing">Nothing</text>
+<text x="144" y="339" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">wider</text>
+<text x="198" y="339" fill="#6b717d" xml:space="preserve" textLength="36" lengthAdjust="spacing">than</text>
+<text x="243" y="339" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">Cursor&#x27;s</text>
+<text x="324" y="339" fill="#6b717d" xml:space="preserve" textLength="81" lengthAdjust="spacing">defaults.</text>
+<text x="414" y="339" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">Never</text>
+<text x="468" y="339" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">deleted:</text>
+<text x="549" y="339" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">removing</text>
+<text x="630" y="339" fill="#6b717d" xml:space="preserve" textLength="9" lengthAdjust="spacing">a</text>
+<text x="648" y="339" fill="#6b717d" xml:space="preserve" textLength="72" lengthAdjust="spacing">stricter</text>
+<text x="729" y="339" fill="#6b717d" xml:space="preserve" textLength="36" lengthAdjust="spacing">file</text>
+<text x="774" y="339" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">would</text>
+<text x="828" y="339" fill="#6b717d" xml:space="preserve" textLength="45" lengthAdjust="spacing">widen</text>
+<text x="882" y="339" fill="#6b717d" xml:space="preserve" textLength="63" lengthAdjust="spacing">access.</text>
+<text x="27" y="358" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">!</text>
+<text x="45" y="358" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="72" lengthAdjust="spacing">sandbox:</text>
+<text x="126" y="358" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="63" lengthAdjust="spacing">network</text>
+<text x="198" y="358" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="63" lengthAdjust="spacing">default</text>
+<text x="270" y="358" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">allow</text>
+<text x="342" y="358" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="36" lengthAdjust="spacing">WIDE</text>
+<text x="405" y="358" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="135" lengthAdjust="spacing">[~/code/webapp]</text>
+<text x="72" y="377" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">all</text>
+<text x="108" y="377" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">network</text>
+<text x="180" y="377" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">traffic</text>
+<text x="252" y="377" fill="#abb2bf" xml:space="preserve" textLength="18" lengthAdjust="spacing">is</text>
+<text x="279" y="377" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">allowed</text>
+<text x="351" y="377" fill="#abb2bf" xml:space="preserve" textLength="18" lengthAdjust="spacing">by</text>
+<text x="378" y="377" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">default</text>
+<text x="72" y="396" fill="#abb2bf" xml:space="preserve" textLength="72" lengthAdjust="spacing">Removing</text>
+<text x="153" y="396" fill="#abb2bf" xml:space="preserve" textLength="54" lengthAdjust="spacing">resets</text>
+<text x="216" y="396" fill="#abb2bf" xml:space="preserve" textLength="18" lengthAdjust="spacing">it</text>
+<text x="243" y="396" fill="#abb2bf" xml:space="preserve" textLength="18" lengthAdjust="spacing">to</text>
+<text x="270" y="396" fill="#abb2bf" xml:space="preserve" textLength="72" lengthAdjust="spacing">Cursor&#x27;s</text>
+<text x="351" y="396" fill="#abb2bf" xml:space="preserve" textLength="72" lengthAdjust="spacing">default:</text>
+<text x="432" y="396" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">deny</text>
+<text x="18" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
+<text x="45" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="27" lengthAdjust="spacing">MCP</text>
+<text x="81" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="63" lengthAdjust="spacing">servers</text>
+<text x="153" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="27" lengthAdjust="spacing">and</text>
+<text x="189" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">hooks:</text>
+<text x="252" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">1</text>
+<text x="270" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">found,</text>
+<text x="333" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">0</text>
+<text x="351" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">stale,</text>
+<text x="414" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">1</text>
+<text x="432" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">risky</text>
+<text x="486" y="434" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
+<text x="27" y="453" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">!</text>
+<text x="45" y="453" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="27" lengthAdjust="spacing">MCP</text>
+<text x="81" y="453" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="63" lengthAdjust="spacing">server:</text>
+<text x="153" y="453" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">github</text>
+<text x="234" y="453" fill="#e06c75" font-weight="bold" xml:space="preserve" textLength="135" lengthAdjust="spacing">[~/code/webapp]</text>
+<text x="72" y="472" fill="#abb2bf" xml:space="preserve" textLength="45" lengthAdjust="spacing">Runs:</text>
+<text x="126" y="472" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">npx</text>
+<text x="162" y="472" fill="#abb2bf" xml:space="preserve" textLength="18" lengthAdjust="spacing">-y</text>
+<text x="189" y="472" fill="#abb2bf" xml:space="preserve" textLength="72" lengthAdjust="spacing">some-mcp</text>
+<text x="72" y="491" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">The</text>
+<text x="108" y="491" fill="#abb2bf" xml:space="preserve" textLength="45" lengthAdjust="spacing">agent</text>
+<text x="162" y="491" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">can</text>
+<text x="198" y="491" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">call</text>
+<text x="243" y="491" fill="#abb2bf" xml:space="preserve" textLength="36" lengthAdjust="spacing">this</text>
+<text x="288" y="491" fill="#abb2bf" xml:space="preserve" textLength="72" lengthAdjust="spacing">server&#x27;s</text>
+<text x="369" y="491" fill="#abb2bf" xml:space="preserve" textLength="54" lengthAdjust="spacing">tools.</text>
+<text x="18" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
+<text x="45" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="63" lengthAdjust="spacing">Project</text>
+<text x="117" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="36" lengthAdjust="spacing">data</text>
+<text x="162" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="72" lengthAdjust="spacing">folders:</text>
+<text x="243" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">3</text>
+<text x="261" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">found,</text>
+<text x="324" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">2</text>
+<text x="342" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="54" lengthAdjust="spacing">stale,</text>
+<text x="405" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">0</text>
+<text x="423" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="45" lengthAdjust="spacing">risky</text>
+<text x="477" y="529" fill="#61afef" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">==</text>
+<text x="45" y="548" fill="#abb2bf" xml:space="preserve" textLength="117" lengthAdjust="spacing">~/code/webapp</text>
+<text x="234" y="548" fill="#abb2bf" xml:space="preserve" textLength="18" lengthAdjust="spacing">0B</text>
+<text x="27" y="567" fill="#e5c07b" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">x</text>
+<text x="45" y="567" fill="#e5c07b" font-weight="bold" xml:space="preserve" textLength="117" lengthAdjust="spacing">1760472831955</text>
+<text x="234" y="567" fill="#e5c07b" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">0B</text>
+<text x="270" y="567" fill="#e5c07b" font-weight="bold" xml:space="preserve" textLength="36" lengthAdjust="spacing">TEMP</text>
+<text x="72" y="586" fill="#e5c07b" xml:space="preserve" textLength="81" lengthAdjust="spacing">temporary</text>
+<text x="162" y="586" fill="#e5c07b" xml:space="preserve" textLength="18" lengthAdjust="spacing">or</text>
+<text x="189" y="586" fill="#e5c07b" xml:space="preserve" textLength="108" lengthAdjust="spacing">empty-window</text>
+<text x="306" y="586" fill="#e5c07b" xml:space="preserve" textLength="72" lengthAdjust="spacing">project,</text>
+<text x="387" y="586" fill="#e5c07b" xml:space="preserve" textLength="18" lengthAdjust="spacing">no</text>
+<text x="414" y="586" fill="#e5c07b" xml:space="preserve" textLength="54" lengthAdjust="spacing">folder</text>
+<text x="477" y="586" fill="#e5c07b" xml:space="preserve" textLength="54" lengthAdjust="spacing">behind</text>
+<text x="540" y="586" fill="#e5c07b" xml:space="preserve" textLength="18" lengthAdjust="spacing">it</text>
+<text x="72" y="605" fill="#e5c07b" xml:space="preserve" textLength="54" lengthAdjust="spacing">Holds:</text>
+<text x="135" y="605" fill="#e5c07b" xml:space="preserve" textLength="63" lengthAdjust="spacing">nothing</text>
+<text x="207" y="605" fill="#e5c07b" xml:space="preserve" textLength="45" lengthAdjust="spacing">known</text>
+<text x="270" y="605" fill="#e5c07b" xml:space="preserve" textLength="18" lengthAdjust="spacing">(0</text>
+<text x="297" y="605" fill="#e5c07b" xml:space="preserve" textLength="54" lengthAdjust="spacing">files,</text>
+<text x="360" y="605" fill="#e5c07b" xml:space="preserve" textLength="27" lengthAdjust="spacing">0B)</text>
+<text x="27" y="624" fill="#e5c07b" font-weight="bold" xml:space="preserve" textLength="9" lengthAdjust="spacing">x</text>
+<text x="45" y="624" fill="#e5c07b" font-weight="bold" xml:space="preserve" textLength="360" lengthAdjust="spacing">tmp-3f9c1a2e-7b44-4d0e-9a51-c2e8d6b01f77</text>
+<text x="477" y="624" fill="#e5c07b" font-weight="bold" xml:space="preserve" textLength="18" lengthAdjust="spacing">0B</text>
+<text x="513" y="624" fill="#e5c07b" font-weight="bold" xml:space="preserve" textLength="36" lengthAdjust="spacing">TEMP</text>
+<text x="72" y="643" fill="#e5c07b" xml:space="preserve" textLength="81" lengthAdjust="spacing">temporary</text>
+<text x="162" y="643" fill="#e5c07b" xml:space="preserve" textLength="18" lengthAdjust="spacing">or</text>
+<text x="189" y="643" fill="#e5c07b" xml:space="preserve" textLength="108" lengthAdjust="spacing">empty-window</text>
+<text x="306" y="643" fill="#e5c07b" xml:space="preserve" textLength="72" lengthAdjust="spacing">project,</text>
+<text x="387" y="643" fill="#e5c07b" xml:space="preserve" textLength="18" lengthAdjust="spacing">no</text>
+<text x="414" y="643" fill="#e5c07b" xml:space="preserve" textLength="54" lengthAdjust="spacing">folder</text>
+<text x="477" y="643" fill="#e5c07b" xml:space="preserve" textLength="54" lengthAdjust="spacing">behind</text>
+<text x="540" y="643" fill="#e5c07b" xml:space="preserve" textLength="18" lengthAdjust="spacing">it</text>
+<text x="72" y="662" fill="#e5c07b" xml:space="preserve" textLength="54" lengthAdjust="spacing">Holds:</text>
+<text x="135" y="662" fill="#e5c07b" xml:space="preserve" textLength="63" lengthAdjust="spacing">nothing</text>
+<text x="207" y="662" fill="#e5c07b" xml:space="preserve" textLength="45" lengthAdjust="spacing">known</text>
+<text x="270" y="662" fill="#e5c07b" xml:space="preserve" textLength="18" lengthAdjust="spacing">(0</text>
+<text x="297" y="662" fill="#e5c07b" xml:space="preserve" textLength="54" lengthAdjust="spacing">files,</text>
+<text x="360" y="662" fill="#e5c07b" xml:space="preserve" textLength="27" lengthAdjust="spacing">0B)</text>
+<text x="18" y="700" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">Legend:</text>
+<text x="90" y="700" fill="#e06c75" xml:space="preserve" textLength="9" lengthAdjust="spacing">!</text>
+<text x="108" y="700" fill="#e06c75" xml:space="preserve" textLength="45" lengthAdjust="spacing">risky</text>
+<text x="180" y="700" fill="#e5c07b" xml:space="preserve" textLength="9" lengthAdjust="spacing">x</text>
+<text x="198" y="700" fill="#e5c07b" xml:space="preserve" textLength="45" lengthAdjust="spacing">stale</text>
+<text x="270" y="700" fill="#6b717d" xml:space="preserve" textLength="9" lengthAdjust="spacing">#</text>
+<text x="288" y="700" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">locked</text>
+<text x="351" y="700" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">(shown</text>
+<text x="414" y="700" fill="#6b717d" xml:space="preserve" textLength="54" lengthAdjust="spacing">only).</text>
+<text x="486" y="700" fill="#abb2bf" xml:space="preserve" textLength="27" lengthAdjust="spacing">Run</text>
+<text x="522" y="700" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">without</text>
+<text x="594" y="700" fill="#abb2bf" xml:space="preserve" textLength="72" lengthAdjust="spacing">--report</text>
+<text x="675" y="700" fill="#abb2bf" xml:space="preserve" textLength="18" lengthAdjust="spacing">to</text>
+<text x="702" y="700" fill="#abb2bf" xml:space="preserve" textLength="63" lengthAdjust="spacing">revoke.</text>
+</svg>
