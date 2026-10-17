@@ -175,7 +175,17 @@ class TestProjects(FakeHome):
         it = self.only(cr.encode_project(str(gone)))
         self.assertEqual((it.stale, it.selected), (True, True))
         self.assertIn("MISSING", it.badge)
-        self.assertTrue(any(str(gone) in d for d in it.detail), it.detail)
+        self.assertTrue(any("Project: ~/code/old app" in d for d in it.detail), it.detail)
+
+    def test_project_paths_under_home_are_shown_with_tilde(self):
+        app = self.home / "code" / "app"
+        app.mkdir(parents=True)
+        self.workspace("file://" + str(app))
+        self.proj(cr.encode_project(str(app)))
+        it = self.only(cr.encode_project(str(app)))
+        self.assertEqual(it.title, "~/code/app")
+        self.assertEqual(it.file, str(cr.PROJECTS_DIR / it.name))
+        self.assertFalse(any(str(self.home) in d for d in it.detail), it.detail)
 
     def test_dash_in_name_resolves_by_disk_probe(self):
         app = self.home / "code" / "my-app"
@@ -721,6 +731,18 @@ class TestReport(CliBase):
         self.assertIn("! risky   ~ stale   # locked (shown only)", r.stdout)
         self.assertTrue(any(l.startswith(" # ") for l in r.stdout.splitlines()), r.stdout)
         self.assertTrue(any(l.startswith(" ! ") for l in r.stdout.splitlines()), r.stdout)
+
+    def test_report_names_where_each_config_item_lives(self):
+        self.write(".cursor/sandbox.json", {"type": "workspace_readwrite"})
+        self.write(".cursor/.cursor/sandbox.json", {"type": "workspace_readwrite"})
+        r = self.run_cli("--report", "--roots", str(self.home))
+        lines = r.stdout.splitlines()
+        sandbox = [l for l in lines if "at or stricter than Cursor's defaults" in l]
+        self.assertEqual(len(sandbox), 2, r.stdout)
+        self.assertTrue(any(l.endswith("[global]") for l in sandbox), sandbox)
+        self.assertTrue(any(l.endswith("[~/.cursor]") for l in sandbox), sandbox)
+        self.assertTrue(any("Shell(sudo)" in l and "[global]" in l for l in lines), r.stdout)
+        self.assertFalse(any(l != l.rstrip() for l in lines), "trailing spaces in report")
 
     def test_report_only_risky_hides_ok_items(self):
         r = self.run_cli("--report", "--only", "risky", "--roots", str(self.home))

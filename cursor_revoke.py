@@ -427,19 +427,19 @@ def scan_projects():
                     status, unchecked = "UNKNOWN", True
         files, size = folder_stats(d)
         present = [s for s in PROJECT_SUBDIRS if safe_is_dir(d / s)]
-        detail = [f"Data folder: {d}"]
+        detail = [f"Data folder: {short_home(d)}"]
         if unchecked:
-            detail.append(f"Project: {orig}   [could not be checked, no permission]")
+            detail.append(f"Project: {short_home(orig)}   [could not be checked, no permission]")
         elif status == "UNKNOWN":
             detail.append("unknown, folder not found")
         elif status == "TEMP":
             detail.append("temporary or empty-window project, no folder behind it")
         elif orig:
-            detail.append(f"Project: {orig}" + ("   [no longer exists]" if stale else ""))
+            detail.append(f"Project: {short_home(orig)}" + ("   [no longer exists]" if stale else ""))
         detail.append("Holds: " + (", ".join(present) if present else "nothing known")
                       + f"  ({files} files, {human(size)})")
         badge = f"{human(size):>7}" + (f"  {status}" if status else "")
-        title = orig or name
+        title = short_home(orig) if orig else name
         items.append(Item("projdir", str(d), title, badge, detail, stale=stale,
                           selected=stale, size=size, name=name,
                           where=short_home(Path(orig).parent) if orig else short_home(PROJECTS_DIR),
@@ -1095,7 +1095,13 @@ def print_report(cats, only="all"):
             if not show_in(it, only):
                 continue
             flag = "#" if it.locked else ("!" if it.risky else ("~" if it.stale else " "))
-            print(f" {flag} {clean(it.title)}   {clean(it.badge)}")
+            line = f" {flag} {clean(it.title)}"
+            if it.badge:
+                line += f"   {clean(it.badge)}"
+            # Project data folders already show their path as the title.
+            if it.where and it.kind != "projdir":
+                line += f"   [{clean(it.where)}]"
+            print(line.rstrip())
             for d in it.detail[1:]:
                 if it.risky or it.stale or it.locked:
                     print(f"      {clean(d)}")
