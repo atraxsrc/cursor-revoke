@@ -13,6 +13,8 @@ changes (it rewrites its config files while running).
 import json
 import os
 import re
+import shutil
+import sys
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -197,6 +199,11 @@ def write_json_atomic(p, data):
         fh.write("\n")
         os.fchmod(fh.fileno(), mode)
     os.replace(tmp, p)
+
+
+def encode_path(p):
+    # A flat, unique file name for a path: every non-alphanumeric character -> "-".
+    return re.sub(r"[^A-Za-z0-9]", "-", str(p))
 
 
 def short_home(p):
@@ -636,3 +643,238 @@ def scan_all(roots):
                  "Per-project agent data: MCP descriptors, terminals, transcripts (~/.cursor/projects)",
                  scan_projects()),
     ]
+
+
+# --------------------------------------------------------------------------- actions
+def describe(it):
+    f = short_home(it.file)
+    field_ = ".".join(it.jpath)
+    if it.op == "move":
+        return f"Quarantine project data ({human(it.size)}): {it.title}"
+    if it.op == "harden":
+        return f"Add deny rules for SSH/AWS/GPG keys and .env/.pem/.key files to {f}"
+    if it.op == "pop_key":
+        what = {"mcp": "MCP server", "hook": "hook"}.get(it.kind, f"{field_} entry")
+        return f"Remove {what}: {it.value} ({f})"
+    if it.op == "reset":
+        return f"Reset sandbox {field_} to {it.value} ({f})"
+    what = {"allow": f"{field_} rule" if it.jpath != ["permissions", "allow"] else "allow rule",
+            "autorun": "auto-run rule", "sandbox": f"sandbox {field_} entry"}.get(it.kind, f"{field_} entry")
+    return f"Remove {what}: {it.value} ({f})"
+
+
+MISSING = object()
+
+
+def get_path(data, path):
+    """The value at path inside nested dicts, or MISSING."""
+    node = data
+    for k in path:
+        if not isinstance(node, dict) or k not in node:
+            return MISSING
+        node = node[k]
+    return node
+
+
+def apply_plan(plan):
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    qdir = QUARANTINE_ROOT / ts
+    # The quarantine holds project data and config backups: owner-only.
+    QUARANTINE_ROOT.mkdir(parents=True, exist_ok=True)
+    os.chmod(QUARANTINE_ROOT, 0o700)
+    qdir.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(qdir, 0o700)
+    # "edits" records each JSON entry removed (or, for harden, added; for a
+    # sandbox reset, the old and new value) so that --restore can undo exactly
+    # those without touching anything newer.
+    manifest = {"created": ts, "moves": [], "backups": [], "edits": []}
+    log = []
+    by_file = {}
+    moves = []
+    for it in plan:
+        if it.locked or not it.op or not it.file:
+            continue
+        if it.op == "move":
+            moves.append(it)
+        else:
+            by_file.setdefault(it.file, []).append(it)
+
+    def backup(p):
+        if p.exists():
+            dest = qdir / "backup" / encode_path(p)
+            dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            shutil.copy2(p, dest)
+            manifest["backups"].append({"original": str(p), "copy": str(dest)})
+
+    def edit(file, path, **undo):
+        manifest["edits"].append({"file": str(file), "path": path, **undo})
+
+    for file, items in by_file.items():
+        p = Path(file)
+        data = load_json(p)
+        created = False
+        if (data is None and any(i.op == "harden" for i in items)
+                and p == Path(GLOBAL_CLI) and path_state(p) == "missing"):
+            data, created = {}, True     # restore then just removes the added rules
+        if not isinstance(data, dict):
+            log.append(f"SKIP {file}: unreadable")
+            continue
+        if not created:
+            backup(p)
+        changed = False
+        for it in items:
+            ok = False
+            where = ".".join(it.jpath)
+            if it.op == "drop_entry":
+                lst = get_path(data, it.jpath)
+                if isinstance(lst, list) and it.value in lst:
+                    at = lst.index(it.value)
+                    lst[:] = [e for e in lst if e != it.value]
+                    edit(file, it.jpath, append=it.value, index=at)
+                    ok = True
+                    log.append(f"OK   removed {it.value} from {where} in {file}")
+                else:
+                    log.append(f"SKIP {it.value} no longer in {where} in {file}")
+            elif it.op == "pop_key":
+                d = get_path(data, it.jpath)
+                if isinstance(d, dict) and it.value in d:
+                    edit(file, it.jpath + [it.value], set=d.pop(it.value))
+                    ok = True
+                    log.append(f"OK   removed {where} entry {it.value} from {file}")
+                else:
+                    log.append(f"SKIP {it.value} no longer in {where} in {file}")
+            elif it.op == "reset":
+                parent = get_path(data, it.jpath[:-1])
+                old = get_path(data, it.jpath)
+                if isinstance(parent, dict) and old is not MISSING and old != it.value:
+                    parent[it.jpath[-1]] = it.value
+                    edit(file, it.jpath, was=old, now=it.value)
+                    ok = True
+                    log.append(f"OK   reset {where} to {it.value} in {file}")
+                else:
+                    log.append(f"SKIP {where} in {file}: already {it.value} or gone")
+            elif it.op == "harden":
+                node, bad = data, False
+                for k in it.jpath:
+                    if node.get(k, MISSING) is MISSING:
+                        node[k] = [] if k == it.jpath[-1] else {}
+                    nxt = node[k]
+                    if not isinstance(nxt, list if k == it.jpath[-1] else dict):
+                        bad = True
+                        break
+                    node = nxt
+                added = [] if bad else [r for r in as_list(it.value) if r not in node]
+                if added:
+                    node.extend(added)
+                    edit(file, it.jpath, remove=added)
+                    ok = True
+                    log.append(f"OK   added {len(added)} deny rules to {file}")
+                elif bad:
+                    log.append(f"SKIP {where} in {file} is not a list, deny rules not added")
+                else:
+                    log.append(f"SKIP deny rules already in {file}")
+            else:
+                log.append(f"SKIP {file}: unknown action {it.op}")
+            changed = changed or ok
+        if changed:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            write_json_atomic(p, data)
+
+    # moves into quarantine (project data folders only, never config files)
+    for it in moves:
+        src = Path(it.file)
+        if it.kind != "projdir":
+            log.append(f"SKIP {src}: only project data folders are moved")
+            continue
+        dest = qdir / "projects" / encode_path(it.file)
+        dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            shutil.move(str(src), str(dest))
+            manifest["moves"].append({"original": str(src), "quarantined": str(dest)})
+            log.append(f"OK   quarantined {src}")
+        except OSError as e:
+            log.append(f"FAIL {src}: {e}")
+
+    write_json_atomic(qdir / "manifest.json", manifest)
+    log.append("")
+    log.append(f"Everything removed is in {qdir}")
+    log.append(f"Undo:  {sys.argv[0]} --restore {qdir}")
+    log.append(f"Once you're sure, delete it for good:  rm -rf {qdir}")
+    return log
+
+
+def put_back(data, e):
+    """Undo one manifest edit inside the file's current contents. Returns True if it changed anything."""
+    if "now" in e:                      # a sandbox reset: undo only if our value is still there
+        parent = get_path(data, e["path"][:-1])
+        last = e["path"][-1]
+        if isinstance(parent, dict) and last in parent and parent[last] == e["now"]:
+            parent[last] = e["was"]
+            return True
+        return False
+    node = data
+    for k in e["path"][:-1]:
+        if not isinstance(node.get(k), dict):
+            node[k] = {}
+        node = node[k]
+    last = e["path"][-1]
+    if "set" in e:                      # a removed entry: put it back unless something newer is there
+        if last in node:
+            return False
+        node[last] = e["set"]
+        return True
+    if not isinstance(node.get(last), list):
+        node[last] = []
+    lst = node[last]
+    if "append" in e:                   # a removed list rule
+        if e["append"] in lst:
+            return False
+        at = e.get("index")              # optional: where it was, so order comes back too
+        if isinstance(at, int) and 0 <= at < len(lst):
+            lst.insert(at, e["append"])
+        else:
+            lst.append(e["append"])
+        return True
+    changed = False
+    for r in e.get("remove", []):       # rules that harden added
+        if r in lst:
+            lst.remove(r)
+            changed = True
+    return changed
+
+
+def restore(qdir):
+    qdir = Path(qdir)
+    manifest = load_json(qdir / "manifest.json")
+    if not isinstance(manifest, dict):
+        sys.exit(f"No manifest.json in {qdir}")
+    for m in reversed(as_list(manifest.get("moves"))):
+        src, dest = Path(m["quarantined"]), Path(m["original"])
+        if dest.exists():
+            print(f"SKIP {dest} already exists")
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+        print(f"OK   restored {dest}")
+    # Removed JSON entries go back into the file as it is NOW, so whatever Cursor
+    # wrote since the run is kept. The full backup is only used when the file
+    # is gone. A file that exists but no longer parses is never overwritten.
+    edits = {}
+    for e in as_list(manifest.get("edits")):
+        edits.setdefault(e["file"], []).append(e)
+    backups = {b["original"]: b["copy"] for b in as_list(manifest.get("backups"))}
+    for file in sorted(edits):
+        data = load_json(file)
+        if isinstance(data, dict):
+            n = sum(put_back(data, e) for e in edits[file])
+            if n:
+                write_json_atomic(Path(file), data)
+            print(f"OK   put {n} entr{'y' if n == 1 else 'ies'} back into {file}")
+        elif file in backups and path_state(file) == "missing":
+            Path(file).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(backups[file], file)
+            print(f"OK   restored {file} from backup")
+        elif file in backups:
+            print(f"SKIP {file}: unreadable, not touched; the old copy is {backups[file]}")
+        else:
+            print(f"SKIP {file}: missing or unreadable and no backup in {qdir}")

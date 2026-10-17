@@ -2,6 +2,8 @@
 
     python3 -m unittest discover -s tests
 """
+import contextlib
+import io
 import json
 import os
 import stat
@@ -58,6 +60,17 @@ class FakeHome(unittest.TestCase):
         p.write_text(text)
         os.chmod(p, perms)
         return p
+
+    def latest_quarantine(self):
+        return next(cr.QUARANTINE_ROOT.iterdir())
+
+    def restore_latest(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            cr.restore(self.latest_quarantine())
+        return out.getvalue()
+
+    def manifest(self):
+        return cr.load_json(self.latest_quarantine() / "manifest.json")
 
 
 class TestFilePermissions(FakeHome):
@@ -393,6 +406,212 @@ class TestScan(FakeHome):
         self.assertEqual(got[0].where, "~/.cursor")
         self.assertEqual(cr.find_cursor_dirs([self.home / "nowhere"]),
                          [self.home / ".cursor" / ".cursor"])
+
+
+class TestApply(FakeHome):
+    def items(self):
+        return [i for c in cr.scan_all([self.home]) for i in c.items]
+
+    def test_round_trip_restores_everything(self):
+        files = {
+            ".cursor/cli-config.json": {"version": 1, "permissions": {"allow": ["Shell(*)"], "deny": []}},
+            ".cursor/mcp.json": {"mcpServers": {"srv": {"command": "x"}}},
+            "code/app/.cursor/permissions.json": {"autoRun": {"allow_instructions": ["run all"],
+                                                              "block_instructions": ["no rm"]}},
+            "code/app/.cursor/sandbox.json": {"type": "insecure_none",
+                                              "networkPolicy": {"default": "allow", "allow": ["*", "pypi.org"]},
+                                              "additionalReadwritePaths": ["~", "build"]},
+            "code/app/.cursor/hooks.json": {"version": 1, "hooks": {"stop": [{"command": "./x.sh"}]}},
+            "code/lib/.cursor/cli.json": {"permissions": {"allow": ["Read(**)", "Shell(ls)"]}},
+        }
+        paths = {rel: self.write(rel, data, perms=0o600) for rel, data in files.items()}
+        proj = cr.PROJECTS_DIR / "tmp-0123abcd-0123-4567-89ab-0123456789ab"
+        (proj / "mcps").mkdir(parents=True)
+        (proj / "mcps" / "a.json").write_text("{}")
+
+        plan = [i for i in self.items() if i.op and not i.locked and i.value != "Shell(ls)"]
+        self.assertEqual({i.op for i in plan}, {"drop_entry", "pop_key", "reset", "harden", "move"})
+        log = cr.apply_plan(plan)
+        self.assertFalse(any(line.startswith(("SKIP", "FAIL")) for line in log), log)
+
+        got = {rel: cr.load_json(p) for rel, p in paths.items()}
+        self.assertEqual(got[".cursor/cli-config.json"]["permissions"],
+                         {"allow": [], "deny": cr.DENY_RULES})
+        self.assertEqual(got[".cursor/mcp.json"], {"mcpServers": {}})
+        self.assertEqual(got["code/app/.cursor/permissions.json"]["autoRun"],
+                         {"allow_instructions": [], "block_instructions": ["no rm"]})
+        self.assertEqual(got["code/app/.cursor/sandbox.json"],
+                         {"type": "workspace_readwrite",
+                          "networkPolicy": {"default": "deny", "allow": ["pypi.org"]},
+                          "additionalReadwritePaths": ["build"]})
+        self.assertEqual(got["code/app/.cursor/hooks.json"], {"version": 1, "hooks": {}})
+        self.assertEqual(got["code/lib/.cursor/cli.json"], {"permissions": {"allow": ["Shell(ls)"]}})
+        self.assertFalse(proj.exists())
+        backups = [Path(b["copy"]) for b in self.manifest()["backups"]]
+        self.assertEqual(sorted(b["original"] for b in self.manifest()["backups"]),
+                         sorted(str(p) for p in paths.values()))
+        self.assertEqual(len(set(backups)), len(backups))
+        self.assertTrue(all(b.is_file() for b in backups))
+
+        self.restore_latest()
+        for rel, p in paths.items():
+            self.assertEqual(cr.load_json(p), files[rel], rel)
+            self.assertEqual(mode(p), 0o600, rel)
+        self.assertTrue((proj / "mcps" / "a.json").is_file())
+
+    def test_locked_items_are_ignored(self):
+        self.write(".cursor/cli-config.json", {"permissions": {"deny": ["Read(x)"]}, "approvalMode": "yolo"})
+        self.write(".cursor/permissions.json", {"autoRun": {"block_instructions": ["no rm"]},
+                                                "terminalBlocklist": ["rm"]})
+        self.write_text(".cursor/mcp.json", '{"mcpServers": {}, // note\n}')
+        files = sorted(p for p in (self.home / ".cursor").iterdir())
+        before = {p: p.read_bytes() for p in files}
+        plan = [i for i in self.items() if i.kind in ("deny", "approval", "block", "unknown")]
+        self.assertEqual({i.kind for i in plan}, {"deny", "approval", "block", "unknown"})
+        for i in plan:
+            i.op = i.op or "drop_entry"   # even if something set an op, locked wins
+        cr.apply_plan(plan)
+        self.assertEqual({p: p.read_bytes() for p in files}, before)
+        self.assertEqual(self.manifest()["edits"], [])
+
+    def test_entry_removed_by_cursor_meanwhile_is_skipped(self):
+        p = self.write(".cursor/cli-config.json", {"permissions": {"allow": ["Shell(*)", "Shell(ls)"]}})
+        plan = [i for i in self.items() if i.value == "Shell(*)"]
+        self.assertEqual(len(plan), 1)
+        self.write(".cursor/cli-config.json", {"permissions": {"allow": ["Shell(ls)"]}, "new": 1})
+        log = cr.apply_plan(plan)
+        self.assertTrue(any(line.startswith("SKIP") for line in log), log)
+        self.assertEqual(cr.load_json(p), {"permissions": {"allow": ["Shell(ls)"]}, "new": 1})
+        self.assertEqual(self.manifest()["edits"], [])
+
+    def test_file_turned_invalid_meanwhile_is_not_written(self):
+        p = self.write(".cursor/mcp.json", {"mcpServers": {"srv": {"command": "x"}}})
+        plan = [i for i in self.items() if i.kind == "mcp"]
+        self.assertEqual(len(plan), 1)
+        p.write_text("{bad")
+        log = cr.apply_plan(plan)
+        self.assertEqual(p.read_bytes(), b"{bad")
+        self.assertIn(f"SKIP {p}: unreadable", log)
+        self.assertEqual(self.manifest()["edits"], [])
+
+    def sandbox_off(self):
+        p = self.write("code/app/.cursor/sandbox.json", {"type": "insecure_none"})
+        plan = [i for i in self.items() if i.kind == "sandbox"]
+        self.assertEqual([(i.op, i.jpath) for i in plan], [("reset", ["type"])])
+        cr.apply_plan(plan)
+        self.assertEqual(cr.load_json(p), {"type": "workspace_readwrite"})
+        self.assertEqual(self.manifest()["edits"],
+                         [{"file": str(p), "path": ["type"], "was": "insecure_none",
+                           "now": "workspace_readwrite"}])
+        return p
+
+    def test_restore_undoes_untouched_reset(self):
+        p = self.sandbox_off()
+        self.restore_latest()
+        self.assertEqual(cr.load_json(p), {"type": "insecure_none"})
+
+    def test_restore_keeps_newer_changes(self):
+        p = self.sandbox_off()
+        cr.write_json_atomic(p, {"type": "workspace_readonly", "networkPolicy": {"allow": ["pypi.org"]}})
+        self.restore_latest()
+        self.assertEqual(cr.load_json(p), {"type": "workspace_readonly",
+                                           "networkPolicy": {"allow": ["pypi.org"]}})
+
+    def test_reset_skipped_when_field_already_default_or_gone(self):
+        p = self.write(".cursor/sandbox.json", {"type": "insecure_none",
+                                                "networkPolicy": {"default": "allow"}})
+        plan = [i for i in self.items() if i.kind == "sandbox"]
+        self.assertEqual(len(plan), 2)
+        self.write(".cursor/sandbox.json", {"type": "workspace_readwrite"})
+        log = cr.apply_plan(plan)
+        self.assertEqual(sum(line.startswith("SKIP") for line in log), 2, log)
+        self.assertEqual(cr.load_json(p), {"type": "workspace_readwrite"})
+        self.assertEqual(self.manifest()["edits"], [])
+
+    def test_sandbox_file_is_never_moved(self):
+        p = self.write(".cursor/sandbox.json", {"type": "insecure_none",
+                                                "additionalReadPaths": ["~/.ssh"]})
+        plan = [i for i in self.items() if i.kind == "sandbox"]
+        self.assertEqual(len(plan), 2)
+        cr.apply_plan(plan)
+        self.assertTrue(p.is_file())
+        self.assertEqual(cr.load_json(p), {"type": "workspace_readwrite", "additionalReadPaths": []})
+        self.assertEqual(self.manifest()["moves"], [])
+
+    def test_harden_adds_deny_rules_and_keeps_existing(self):
+        p = self.write(".cursor/cli-config.json", {"permissions": {"deny": ["Read(secret.txt)"]}}, perms=0o600)
+        cr.apply_plan([i for i in self.items() if i.kind == "harden"])
+        deny = cr.load_json(p)["permissions"]["deny"]
+        self.assertEqual(deny, ["Read(secret.txt)"] + cr.DENY_RULES)
+        self.assertEqual(mode(p), 0o600)
+        data = cr.load_json(p)
+        data["permissions"]["deny"].append("Read(mine)")
+        cr.write_json_atomic(p, data)
+        self.restore_latest()
+        self.assertEqual(cr.load_json(p)["permissions"]["deny"], ["Read(secret.txt)", "Read(mine)"])
+
+    def test_harden_adds_only_rules_still_missing(self):
+        p = self.write(".cursor/cli-config.json", {})
+        plan = [i for i in self.items() if i.kind == "harden"]
+        self.write(".cursor/cli-config.json", {"permissions": {"deny": ["Read(**/.env)"]}})
+        cr.apply_plan(plan)
+        deny = cr.load_json(p)["permissions"]["deny"]
+        self.assertEqual(sorted(deny), sorted(cr.DENY_RULES))
+        self.assertEqual(self.manifest()["edits"][0]["remove"],
+                         [r for r in cr.DENY_RULES if r != "Read(**/.env)"])
+
+    def test_harden_creates_missing_global_file(self):
+        plan = [i for i in self.items() if i.kind == "harden"]
+        cr.apply_plan(plan)
+        self.assertEqual(cr.load_json(cr.GLOBAL_CLI), {"permissions": {"deny": cr.DENY_RULES}})
+        self.assertEqual(mode(cr.GLOBAL_CLI), 0o600)
+        self.assertEqual(self.manifest()["backups"], [])
+        self.restore_latest()
+        self.assertEqual(cr.load_json(cr.GLOBAL_CLI), {"permissions": {"deny": []}})
+
+    def test_restore_never_overwrites_a_file_that_turned_unreadable(self):
+        p = self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        cr.apply_plan([i for i in self.items() if i.kind == "mcp"])
+        p.write_text('{"mcpServers": {}, // mine\n}')
+        out = self.restore_latest()
+        self.assertEqual(p.read_text(), '{"mcpServers": {}, // mine\n}')
+        self.assertIn("SKIP", out)
+
+    def test_restore_falls_back_to_backup_when_file_is_gone(self):
+        p = self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        cr.apply_plan([i for i in self.items() if i.kind == "mcp"])
+        p.unlink()
+        self.restore_latest()
+        self.assertEqual(cr.load_json(p), {"mcpServers": {"srv": {}}})
+
+    def test_describe_every_op_bearing_item(self):
+        self.write(".cursor/cli-config.json", {"permissions": {"allow": ["Shell(*)"]}})
+        self.write(".cursor/permissions.json", {"autoRun": {"allow_instructions": ["go"]},
+                                                "terminalAllowlist": ["git status"]})
+        self.write(".cursor/sandbox.json", {"type": "insecure_none", "networkPolicy": {"allow": ["*"]}})
+        self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        self.write(".cursor/hooks.json", {"hooks": {"stop": []}})
+        (cr.PROJECTS_DIR / "12345").mkdir(parents=True)
+        items = [i for i in self.items() if i.op and not i.locked]
+        self.assertEqual({i.kind for i in items},
+                         {"allow", "autorun", "sandbox", "mcp", "hook", "harden", "projdir"})
+        for i in items:
+            d = cr.describe(i)
+            self.assertTrue(d and "\n" not in d, i)
+        by = {cr.describe(i) for i in items}
+        self.assertTrue(any("Shell(*)" in d for d in by), by)
+        self.assertTrue(any("srv" in d for d in by), by)
+        self.assertTrue(any("workspace_readwrite" in d for d in by), by)
+
+    def test_quarantine_folders_are_private(self):
+        self.write(".cursor/mcp.json", {"mcpServers": {"srv": {}}})
+        (cr.PROJECTS_DIR / "12345").mkdir(parents=True)
+        cr.QUARANTINE_ROOT.mkdir(mode=0o775)
+        os.chmod(cr.QUARANTINE_ROOT, 0o775)
+        cr.apply_plan([i for i in self.items() if i.kind in ("mcp", "projdir")])
+        qdir = self.latest_quarantine()
+        for d in (cr.QUARANTINE_ROOT, qdir, qdir / "backup", qdir / "projects"):
+            self.assertEqual(mode(d), 0o700, d)
 
 
 if __name__ == "__main__":
