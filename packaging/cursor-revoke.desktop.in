@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Cursor Revoke
+GenericName=Agent Access Auditor
+Comment=Audit and revoke Cursor agent access on Linux
+Exec=@TERM@ @BIN@ --pause
+Icon=cursor-revoke
+Terminal=false
+Categories=System;Security;Utility;
+Keywords=cursor;revoke;permissions;audit;security;privacy;
